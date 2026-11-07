@@ -1,0 +1,4 @@
+# css-touch-lint (the push guard) arguments. The lint covers this repository's own page, site/.
+# oracle/ holds byte-exact test corpora copied from other sites (their CSS is not ours to change and
+# the golden roots depend on the bytes); scratch/ and ref/ are working data and the reference SDK.
+site

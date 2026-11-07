@@ -78,8 +78,10 @@ code, pre, .mono {
     padding: 0;
     cursor: pointer;
 }
-.running-head a:hover,
-.running-head button:hover { color: var(--accent); }
+@media (hover: hover) {
+    .running-head a:hover,
+    .running-head button:hover { color: var(--accent); }
+}
 #theme-toggle::before { content: "Light"; }
 html.light #theme-toggle::before { content: "Dark"; }
 @media (prefers-color-scheme: light) {
@@ -146,7 +148,9 @@ select, button.act {
     padding: 6px 10px;
 }
 button.act { cursor: pointer; }
-button.act:hover { border-color: var(--accent); }
+@media (hover: hover) {
+    button.act:hover { border-color: var(--accent); }
+}
 #files { margin-top: 14px; }
 #files td:nth-child(4) { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 0.82em; }
 #files td:not(:first-child), #files th { white-space: nowrap; }
@@ -170,7 +174,7 @@ footer {
     flex: 1 1 100%;
     min-width: 0;
 }
-#lk-root:focus { border-color: var(--accent); outline: none; }
+#lk-root:focus { border-color: var(--accent); }
 #lk-form .lk-label { flex: 0 0 100%; }
 #lk-go:disabled { opacity: 0.5; cursor: progress; }
 #lk-status { min-height: 1.5em; margin: 10px 0; color: var(--title); overflow-wrap: anywhere; }
