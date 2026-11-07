@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="color-scheme" content="dark light" />
+        <title>abxfs-rs · TheBenMeadows</title>
+        <meta name="description" content="An independent Rust implementation of ABX FS content ids, with an in-browser folder checker." />
+        <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+        <link rel="stylesheet" href="style.css" />
+        <link rel="preconnect" href="https://mainnet.base.org" crossorigin />
+        <script src="theme.js"></script>
+    </head>
+    <body>
+        <header class="running-head">
+            <a href="https://abx.thebenmeadows.com/">ABX Explorer</a>
+            <button type="button" id="theme-toggle"></button>
+        </header>
+        <main>
+            <h1>abxfs-rs</h1>
+            <p class="sub">
+                An independent implementation of the <a href="https://fs.abx.io/">ABX FS</a> content layer in Rust:
+                FastCDC chunking, FastLZ, chunk ids, chunk and entry node trees, file and directory CIDs, and IPFS
+                CIDs. It plans a folder offline, reads published content back from chain, and checks that what is on
+                chain matches a folder on disk. It writes nothing; publishing is done with the official
+                <code>abxfs</code> CLI.
+            </p>
+
+            <section id="checker">
+                <h2>Check a folder</h2>
+                <p>
+                    Pick a folder to compute its ABX FS root here, with the same Rust code compiled to WebAssembly.
+                    Then ask a chain whether that exact tree is stored. The files never leave this browser; a chain
+                    check sends only content ids (the root, the file CIDs and the chunk ids) to a public RPC endpoint,
+                    which the result names.
+                </p>
+                <p>
+                    Planning here runs on a single thread, and this page plans folders of up to 64 MiB, 5,000 files
+                    and 32 directory levels. For anything larger, use the command line.
+                </p>
+                <div id="drop">
+                    Drop a folder here, or <label for="folder">choose a folder</label>.
+                    <input id="folder" type="file" webkitdirectory multiple />
+                </div>
+                <div id="status" role="status"></div>
+                <div id="result" hidden>
+                    <p>Root <span id="root" class="mono"></span></p>
+                    <p id="plan-facts"></p>
+                    <div class="check-row">
+                        <label for="chain">Chain</label>
+                        <select id="chain">
+                            <option value="base">Base</option>
+                            <option value="arbitrum-one">Arbitrum One</option>
+                            <option value="ethereum">Ethereum</option>
+                            <option value="base-sepolia">Base Sepolia</option>
+                            <option value="arbitrum-sepolia">Arbitrum Sepolia</option>
+                            <option value="sepolia">Sepolia</option>
+                        </select>
+                        <button type="button" class="act" id="check">Check on chain</button>
+                        <button type="button" class="act" id="download">Download plan (JSON)</button>
+                    </div>
+                    <div id="chain-result" role="status"></div>
+                    <div class="table-wrap">
+                        <table id="files">
+                            <thead><tr><th>Path</th><th class="n">Size</th><th>Type</th><th>File CID</th><th id="onchain-head"></th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                <p id="dirs-note">
+                    The folder picker does not report empty directories, which the official CLI includes in a
+                    folder's root. Drag the folder in instead when it holds empty directories. Symlinks are never
+                    followed, as in the CLI.
+                </p>
+            </section>
+
+            <!-- lookup:start -->
+            <section id="lookup">
+                <h2>Look up a root</h2>
+                <p>
+                    Paste a directory or file root to list what a chain holds under it: every file with its size,
+                    type and file CID. Only small contract reads are made; file contents are not downloaded.
+                </p>
+                <form id="lk-form" class="check-row">
+                    <label for="lk-root" class="lk-label">Root</label>
+                    <input id="lk-root" name="root" type="text" class="mono" placeholder="0x…" spellcheck="false"
+                        autocomplete="off" autocapitalize="off" />
+                    <label for="lk-chain">Chain</label>
+                    <select id="lk-chain" name="chain">
+                        <option value="base">Base</option>
+                        <option value="arbitrum-one">Arbitrum One</option>
+                        <option value="ethereum">Ethereum</option>
+                        <option value="base-sepolia">Base Sepolia</option>
+                        <option value="arbitrum-sepolia">Arbitrum Sepolia</option>
+                        <option value="sepolia">Sepolia</option>
+                    </select>
+                    <button type="submit" class="act" id="lk-go">Look up</button>
+                </form>
+                <div id="lk-status" role="status"></div>
+                <div id="lk-result" hidden>
+                    <p>Root <span id="lk-shown" class="mono lk-hash"></span></p>
+                    <p id="lk-facts"></p>
+                    <p id="lk-where"></p>
+                    <p id="lk-checked"></p>
+                    <div class="table-wrap">
+                        <table id="lk-files">
+                            <thead><tr><th>Path</th><th class="n">Stored size</th><th>Type</th><th>CID</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+            <!-- lookup:end -->
+
+            <section id="exact">
+                <h2>Same ids as the official tools</h2>
+                <p>
+                    The reference outputs come from Art Blocks' own code: the official CLI's folder scan and the
+                    <code>@artblocks/abxfs-sdk</code> 0.2.0 offline planner. abxfs-rs reproduces every id in them, on
+                    three folders, each with and without FastLZ: every chunk id, backend and hash, every node id and
+                    byte, every file and directory CID, every IPFS CID, and the totals. Both the native build and
+                    this WebAssembly build pass all six sets.
+                </p>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Folder</th><th class="n">Files</th><th>Root (FastLZ)</th></tr></thead>
+                        <tbody>
+                            <tr><td>abx.thebenmeadows.com</td><td class="n">63</td><td class="mono">0x959aeb7c…e9d45a</td></tr>
+                            <tr><td>find3r, as published</td><td class="n">23</td><td class="mono">0x49a02353…3b822d13</td></tr>
+                            <tr><td>Edge cases (empty, 24,575-byte, 3 MiB of zeros, Unicode names, 2,000 files)</td><td class="n">2,022</td><td class="mono">0x1027316f…1166d6f1</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p>
+                    Reading is checked the same way: trees read by <code>abxfs-rs read</code> from Base and Base Sepolia
+                    are byte-identical to the official <code>abxfs read</code>, including a 5.3 MB file of 216 chunks
+                    and a gzip-encoded file. Every id is recomputed from the bytes as they arrive.
+                </p>
+            </section>
+
+            <section id="speed">
+                <h2>Speed</h2>
+                <p>Measured on an Apple Silicon Mac, release build, three runs each, November 6, 2026.</p>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Task</th><th class="n">Official</th><th class="n">abxfs-rs</th></tr></thead>
+                        <tbody>
+                            <tr><td>Plan the 2,022-file edge folder (SDK offline planner vs <code>abxfs-rs plan</code>)</td><td class="n">0.62 to 0.70 s</td><td class="n">0.03 to 0.06 s</td></tr>
+                            <tr><td>Read a 5.3 MB file from Base Sepolia, <code>sepolia.base.org</code></td><td class="n">8.6 s</td><td class="n">3.1 s</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p>
+                    Planning runs files and chunks in parallel. Reading batches its calls through Multicall3 and
+                    reads chunk bytes straight from their SSTORE2 contracts, so it is not limited by the RPC's
+                    <code>eth_call</code> gas cap.
+                </p>
+            </section>
+
+            <section id="use">
+                <h2>Use</h2>
+<pre>cargo install --git https://github.com/mdws-org/abxfs-rs
+
+abxfs-rs plan ./site                         # every id, offline
+abxfs-rs plan ./site --json                  # the full plan as JSON
+abxfs-rs read 0xROOT --chain base --out ./copy
+abxfs-rs verify 0xROOT ./site --chain base   # exit 0 only on a full match</pre>
+                <p>
+                    Chains: <code>base</code>, <code>base-sepolia</code>, <code>ethereum</code>, <code>sepolia</code>,
+                    <code>arbitrum-one</code>, <code>arbitrum-sepolia</code>; <code>--rpc</code> takes your own endpoint.
+                    Source and issues: <a href="https://github.com/mdws-org/abxfs-rs">github.com/mdws-org/abxfs-rs</a>.
+                </p>
+            </section>
+        </main>
+        <footer>
+            <p>
+                <span id="tool-version"></span>. MIT licensed. Implements the ABX FS content layer as specified by Art
+                Blocks' MIT-licensed <code>@artblocks/abxfs-sdk</code>; not affiliated with Art Blocks.
+            </p>
+        </footer>
+        <script type="module" src="check.js"></script>
+        <script type="module" src="lookup.js"></script>
+    </body>
+</html>

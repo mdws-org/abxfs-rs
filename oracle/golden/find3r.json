@@ -1,0 +1,1366 @@
+{
+ "generator": {
+  "sdk": "@artblocks/abxfs-sdk@0.2.0",
+  "cli": "@artblocks/abxfs-cli@0.1.2",
+  "chain": 8453,
+  "fastLz": true,
+  "backends": {
+   "raw": "0x3C3AE36F5d8Aff2Dd60c37cA9103D93803c4c844",
+   "fastLz": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+   "maxInputSize": 24575
+  }
+ },
+ "rootCid": "0x49a02353d517250c6bec477c3a5c7928992d474b15f1f753f382b57f3b822d13",
+ "uniqueChunks": 57,
+ "storedBytes": 480166,
+ "logicalBytes": 914676,
+ "files": [
+  {
+   "path": "AGENTS.md",
+   "cid": "0x0e1d5defee0b3392e5fa3d39903a522635f13fc9d6ae385e31f766439f97c910",
+   "mimeType": "text/markdown",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 60686,
+   "dataSize": 60686,
+   "storedSize": 36720,
+   "ipfsCid": "bafkreifosxmgwqwr2vrff7vt5vv5wlitamojoc6ejza2alllulkobig5sa",
+   "chunks": [
+    {
+     "id": "0x1b03230ec18fb533ec38fec090cbf4e1ac4bd44428be8187c81e7dd9a5d93bd1",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x25287ba46e3600da4397eb5577f3ce22d95ab33a56a215e6ec628c3c0406e04e",
+     "dataHash": "0x5455090274cc4d16545038f0b912530f3fc72f51c624b8f62f56b2e09830c8e3",
+     "size": 24575,
+     "inputLen": 14516
+    },
+    {
+     "id": "0x8f2f063e96971b422d9928bc4d547824fffd0de95a4775b5c24b519bdec14335",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x4a2530f30b52b4e72574e50e4e4a7fd8c78d74894dd1de8fb4b8c06142973917",
+     "dataHash": "0x722ff31835751d764ff97daa8aec76e11ff0574ccd8566bd2495015c1393244b",
+     "size": 20945,
+     "inputLen": 13024
+    },
+    {
+     "id": "0x3162465c26d5812fe436eb6f5fa7a0c3472fb468d99f46c9ffa79dd3aeecb6c4",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x331b25462810e718cc356123bacaae03c8138844db956b62625110df84ccf20e",
+     "dataHash": "0x242f03a7ba2f957b0c57d031107eb7065b48bc9f8391965dfbbdb7d605632930",
+     "size": 15166,
+     "inputLen": 9180
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0xa65b113629ad11f8cbf5200c4b41b61ec2c82ffd66b3ec4bcc9f843ebcdba15a",
+    "rootLevel": 0,
+    "count": 3,
+    "nodes": [
+     {
+      "id": "0xa65b113629ad11f8cbf5200c4b41b61ec2c82ffd66b3ec4bcc9f843ebcdba15a",
+      "level": 0,
+      "count": 3,
+      "size": 60686,
+      "childIds": [],
+      "blob": "0x001b03230ec18fb533ec38fec090cbf4e1ac4bd44428be8187c81e7dd9a5d93bd1000000005fff8f2f063e96971b422d9928bc4d547824fffd0de95a4775b5c24b519bdec143350000000051d13162465c26d5812fe436eb6f5fa7a0c3472fb468d99f46c9ffa79dd3aeecb6c4000000003b3e"
+     }
+    ]
+   }
+  },
+  {
+   "path": "THIRD_PARTY_NOTICES.txt",
+   "cid": "0x9f5cadf2d31d4cc2e6f923d9c1d0ae3c79a63549ab5f6003b59066eaca47b295",
+   "mimeType": "text/plain",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 12411,
+   "dataSize": 12411,
+   "storedSize": 2106,
+   "ipfsCid": "bafkreifeyn2zysbsfjuswvf2nvyyzq2veuroeslk55lndbefkybu3rvwsi",
+   "chunks": [
+    {
+     "id": "0x2e4d78e6640ca97a03d5b4c075afb6727e68eaa935f79f7c51d04e936b69f3fc",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x1ed5bb969c34baccab3094b2d961690e65ba0e931d09399e3c5ed306f630ec58",
+     "dataHash": "0xc1665d35ab02bdd612c874e88e19560c5b4f60a9c06377c62063c02ad89d7069",
+     "size": 12411,
+     "inputLen": 2106
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0xef4ed887e756f5cb6902f4b357e4df9ce0a92de3f1c3611a858452f1c9de5cce",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0xef4ed887e756f5cb6902f4b357e4df9ce0a92de3f1c3611a858452f1c9de5cce",
+      "level": 0,
+      "count": 1,
+      "size": 12411,
+      "childIds": [],
+      "blob": "0x002e4d78e6640ca97a03d5b4c075afb6727e68eaa935f79f7c51d04e936b69f3fc00000000307b"
+     }
+    ]
+   }
+  },
+  {
+   "path": "agent/recover.mjs",
+   "cid": "0xf4c300bbdf1b6b3834eda79e83a6c29e1417ea6620183f4aea0513bdacc36dcd",
+   "mimeType": "application/javascript",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 71122,
+   "dataSize": 71122,
+   "storedSize": 36233,
+   "ipfsCid": "bafkreice5bv5anh2bfzdo4bxtcroq2iyskry2jbiimr3txoychkwrbrg24",
+   "chunks": [
+    {
+     "id": "0x2c082c6a7ba159a495f066bcbdc3a321692942492c4bd27514717ffc96aa962e",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x386e7762385866be07d21a6b5af01063983bde793749d8caa8525ae0591ec2d2",
+     "dataHash": "0x1845abf81fc9f036b1a3e0d1544f0fda99416e2c95bcb1814bd7dcb37f5444a5",
+     "size": 24575,
+     "inputLen": 11139
+    },
+    {
+     "id": "0x0eb3facf29c78a3315d4a6e73491cf47938756fdd878b7f00f28c8340d06ef7d",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xd9293a61a2b7e663a6a5174cbe884183b8dde22f1c77cd543e04e2fa59a8de0d",
+     "dataHash": "0xd2d513aa2ab807b305dd854ec971b32ac37d74aa94c94037dab3757f3692d495",
+     "size": 22384,
+     "inputLen": 11853
+    },
+    {
+     "id": "0x6264fe8c93a6ebebdf4fd2e9d1524b2c9f511918102a7f962ff111da4dc803ec",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x8ad59e883b66cde99d9d091f08e342fd9c0d03abaff7f1d9f8ac456ee214a994",
+     "dataHash": "0xac8935220c65cae7220655aa78aad94a4cd5b1c7e2d37d7c6a54708ff84c5890",
+     "size": 23012,
+     "inputLen": 12359
+    },
+    {
+     "id": "0x04df05aa8ffcd962a9c84f7cc6b725596e2c6a3c4bf5da63748e1a354a74c9d0",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x28909977f3603666926a10a716c652b8c4721d684401df030bac38afe3120ba8",
+     "dataHash": "0xbada3d4c85bd9ca91ca40dcd41a9832df4affe14ac636739fbf010a41a654449",
+     "size": 1151,
+     "inputLen": 882
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x6a0bad9488a8ab8c39c34564ebc3613103abd05cfb6093a3e408fed5e9098395",
+    "rootLevel": 0,
+    "count": 4,
+    "nodes": [
+     {
+      "id": "0x6a0bad9488a8ab8c39c34564ebc3613103abd05cfb6093a3e408fed5e9098395",
+      "level": 0,
+      "count": 4,
+      "size": 71122,
+      "childIds": [],
+      "blob": "0x002c082c6a7ba159a495f066bcbdc3a321692942492c4bd27514717ffc96aa962e000000005fff0eb3facf29c78a3315d4a6e73491cf47938756fdd878b7f00f28c8340d06ef7d0000000057706264fe8c93a6ebebdf4fd2e9d1524b2c9f511918102a7f962ff111da4dc803ec0000000059e404df05aa8ffcd962a9c84f7cc6b725596e2c6a3c4bf5da63748e1a354a74c9d000000000047f"
+     }
+    ]
+   }
+  },
+  {
+   "path": "agent/serve.mjs",
+   "cid": "0xc7ce45bb3168b5f5c776dab789422cbdff291ed7cd75289ee5a11ae69124f6e2",
+   "mimeType": "application/javascript",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 1656,
+   "dataSize": 1656,
+   "storedSize": 1201,
+   "ipfsCid": "bafkreicyn7j4lsdatvcae2qxp6phy4xb6hsshheavpqaktw3domsgma5we",
+   "chunks": [
+    {
+     "id": "0x48997a5bb39c4e275aa32c39c256700c6e3f71f65e1eefc7cba86f6b1ac0e264",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x2ab37b0b07c4066160cbf9cc555f59c9f21fd7dd796b83978b19c7aa1cffbdf0",
+     "dataHash": "0x05b2e03e47eb0b74c7bf51133c9bdd79178fc1cd7ceb66c582ce7c8a22f03ddb",
+     "size": 1656,
+     "inputLen": 1201
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x2491d58c5a2ed00c6deaf6b902f6fe1923346bac872c887f6651ac3e74376536",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0x2491d58c5a2ed00c6deaf6b902f6fe1923346bac872c887f6651ac3e74376536",
+      "level": 0,
+      "count": 1,
+      "size": 1656,
+      "childIds": [],
+      "blob": "0x0048997a5bb39c4e275aa32c39c256700c6e3f71f65e1eefc7cba86f6b1ac0e264000000000678"
+     }
+    ]
+   }
+  },
+  {
+   "path": "app.css",
+   "cid": "0x34698a5d19a661c35a333d17f65d61252a0d89fcfa0b8485016a186281109a1b",
+   "mimeType": "text/css",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 26426,
+   "dataSize": 26426,
+   "storedSize": 11338,
+   "ipfsCid": "bafkreiagygr6awyd5xgnwjzf37h3dqoshagb5o45pfnloezxsxpqubjvsa",
+   "chunks": [
+    {
+     "id": "0x1585f90a1734d12bfbb2beaa82ee071c10be7aa5c39df65219a10375e4b21d83",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x4a90b45fd8917e7a73f51ac9191f7e61f5cdb1094b81d9aab392184f024b61af",
+     "dataHash": "0xc4d8d3d31a5ae573013b092854116f12b43ea3a3e1a67a51cdc414961cae89c1",
+     "size": 19736,
+     "inputLen": 8205
+    },
+    {
+     "id": "0xd660d4a2acd8f6309d99b6c5af46f11ace5a322f1fab151261a170660bce5dd6",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x6c60eba70d361fcfdf1988c4c442b5b754e766f15b7b70e4465e0b9e2bbc9e27",
+     "dataHash": "0xc69391f66a0ef74de068c68705073233a83299ff28d92e84d7da33d124dead3d",
+     "size": 6690,
+     "inputLen": 3133
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0xa48c3a540571c53fca4717e9ba33235d63c7f98efd071a18021048097ab47aa7",
+    "rootLevel": 0,
+    "count": 2,
+    "nodes": [
+     {
+      "id": "0xa48c3a540571c53fca4717e9ba33235d63c7f98efd071a18021048097ab47aa7",
+      "level": 0,
+      "count": 2,
+      "size": 26426,
+      "childIds": [],
+      "blob": "0x001585f90a1734d12bfbb2beaa82ee071c10be7aa5c39df65219a10375e4b21d83000000004d18d660d4a2acd8f6309d99b6c5af46f11ace5a322f1fab151261a170660bce5dd6000000001a22"
+     }
+    ]
+   }
+  },
+  {
+   "path": "app.js",
+   "cid": "0x64a57d9f9d48da5b9e06bdd952def511e714d8251ebd93a8592cf09abd20bab4",
+   "mimeType": "application/javascript",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 197686,
+   "dataSize": 197686,
+   "storedSize": 101814,
+   "ipfsCid": "bafkreibjyyei3xx4aca7qzfna45khcn4casbxbn52itjtap4fwayumjhze",
+   "chunks": [
+    {
+     "id": "0xbab8190d47f3daca6df7c8703eb97be6a51edcd4518d703d76bc5f11c12d0248",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xaa0e87ceed3a368f295af79b69bb5deba245164fddc28a955af62801808868bb",
+     "dataHash": "0xbb9bcc7666154371f5858be7b6ec611ccf4b5dd3e687c070ea4cbec82a2b5c4c",
+     "size": 24575,
+     "inputLen": 11047
+    },
+    {
+     "id": "0x17fb8f9cba48ec40c107dfa63cba0dfacd5d5556cbf57199eae91f95e563b56a",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xdc2fd010b18232b1b0ed465b84ac938abb2c4021651f2576083da2685a2f466e",
+     "dataHash": "0xfd7b3e3773db79fc77a3f7cc9f331a2fb1a13622e7984c0cf1f6a838d607604d",
+     "size": 23400,
+     "inputLen": 12263
+    },
+    {
+     "id": "0xf079d2c05d7dcf50f50a2cd55706d6eee2909ff81dd5264066dfb01a9bd4d724",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xbc511046fdf3c6d61c7bb3353895cf2caf822ea81acde553470703fc939c148a",
+     "dataHash": "0x5ee8377f9f5b13908fe8cf2bd10328315277a8bf9bcf9e16fe8535b3d6baf368",
+     "size": 23169,
+     "inputLen": 12262
+    },
+    {
+     "id": "0xb705f868bc85d4987f74b73192fe21673e3dbe2103ad410951aa40573ae7f68c",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x690294d4df62a99a254ea98f37d97ba0576426a2975eab6b622d17351cff369b",
+     "dataHash": "0x716e78358afb9e2937f9f738964a7caaafc119d4b230ac975065537356df1fe1",
+     "size": 24575,
+     "inputLen": 13471
+    },
+    {
+     "id": "0x5eba019a16f406b1c0d6c3083f06b7a407e64e65e23a7d8660f7cb107e7657e2",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x3982ebd7315e8b789b0794cbe70fd13778cb253306639111c870b50a38334de2",
+     "dataHash": "0x2bfe74edd90c29a1f5b1aa38dca149c8ad392d5d603b1b9f4c2a75ceaca6f5b3",
+     "size": 24575,
+     "inputLen": 12175
+    },
+    {
+     "id": "0x687e63ac73d7f119cc643f08ddced3fe915f2e0c000b1b04964c9c3877798e5e",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x791b88eed360a705c1153569d874c144d5a89de90f3a18dee06762ef037d7bb1",
+     "dataHash": "0xda7f023834dc89eed3cd53b9cddf8850c25c25288aac8aa0021f2772e1ab9a73",
+     "size": 21517,
+     "inputLen": 11457
+    },
+    {
+     "id": "0xbda12b0fecc2357e701152c7cbdaace2b48841219c404cce6a81e23fc26d5cce",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xf79b8c61bf997bb971129e11c8f168ebc69def1af972b17c994502a93f7f5976",
+     "dataHash": "0x5929ec4e7f8216697798ec18064ffa983d1b079bbdaa4e9886a725b228e0388d",
+     "size": 24575,
+     "inputLen": 13209
+    },
+    {
+     "id": "0x9b41fa04e67e2f47fa05d0064d550abba8291c076032c80ba99dde245f3be00c",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x925f4cd344740a13e5b180789e21fc75abc6e7755b575ad08633c563314013e7",
+     "dataHash": "0x6c4e215912e6f23c814902cd65f2ad936d10bbf4ef19de64776d33a3ea96163b",
+     "size": 24575,
+     "inputLen": 12356
+    },
+    {
+     "id": "0x00357bb17103841fac705d11f1ec5e2f3ec9314558760903d8f4635baff82953",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xd8c4c2a4a0855da57b792c1aaf8a1666f1694734835e6823c2b515db727a7623",
+     "dataHash": "0x50b548d8c1f95801a2d95bba11c8f6ebd031df35320de01663ce227265ec0836",
+     "size": 6725,
+     "inputLen": 3574
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x1f27d18ba85b5723096bd1725dd6d48c7be9f6951b5b644e23fc6281d29d7649",
+    "rootLevel": 0,
+    "count": 9,
+    "nodes": [
+     {
+      "id": "0x1f27d18ba85b5723096bd1725dd6d48c7be9f6951b5b644e23fc6281d29d7649",
+      "level": 0,
+      "count": 9,
+      "size": 197686,
+      "childIds": [],
+      "blob": "0x00bab8190d47f3daca6df7c8703eb97be6a51edcd4518d703d76bc5f11c12d0248000000005fff17fb8f9cba48ec40c107dfa63cba0dfacd5d5556cbf57199eae91f95e563b56a000000005b68f079d2c05d7dcf50f50a2cd55706d6eee2909ff81dd5264066dfb01a9bd4d724000000005a81b705f868bc85d4987f74b73192fe21673e3dbe2103ad410951aa40573ae7f68c000000005fff5eba019a16f406b1c0d6c3083f06b7a407e64e65e23a7d8660f7cb107e7657e2000000005fff687e63ac73d7f119cc643f08ddced3fe915f2e0c000b1b04964c9c3877798e5e00000000540dbda12b0fecc2357e701152c7cbdaace2b48841219c404cce6a81e23fc26d5cce000000005fff9b41fa04e67e2f47fa05d0064d550abba8291c076032c80ba99dde245f3be00c000000005fff00357bb17103841fac705d11f1ec5e2f3ec9314558760903d8f4635baff82953000000001a45"
+     }
+    ]
+   }
+  },
+  {
+   "path": "artwork.html",
+   "cid": "0x8f48e783d29af6a69184befbd8104671d3532096c65457f2048eee6fbfc139a2",
+   "mimeType": "text/html",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 6123,
+   "dataSize": 6123,
+   "storedSize": 3072,
+   "ipfsCid": "bafkreibomkwf7ecovfeduexkxrurz4c4mpgtkc7iuwfq63yf22awaztj6u",
+   "chunks": [
+    {
+     "id": "0xd17555beac8fb6847ee983fcf516344fa5a0d84d0676a4f0e0f793f162d337c0",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x638f9a79cc088e6d1b93eb8216c00ce0e3173eb6c65649c4fa059409c138b31f",
+     "dataHash": "0xa1a06d1c9fac6e6862679cb4c0dc53837bad5012810ccdef491cfb051ffefa94",
+     "size": 6123,
+     "inputLen": 3072
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0xe6c08af3d73360d9dfba4563a7d7923ec6809d454b7a36272ac927eaa680d4ea",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0xe6c08af3d73360d9dfba4563a7d7923ec6809d454b7a36272ac927eaa680d4ea",
+      "level": 0,
+      "count": 1,
+      "size": 6123,
+      "childIds": [],
+      "blob": "0x00d17555beac8fb6847ee983fcf516344fa5a0d84d0676a4f0e0f793f162d337c00000000017eb"
+     }
+    ]
+   }
+  },
+  {
+   "path": "artwork.js",
+   "cid": "0xb5b0e8927367a8618e946ed1a386140422a37341685179a34fcde5a0fb77c77a",
+   "mimeType": "application/javascript",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 160120,
+   "dataSize": 160120,
+   "storedSize": 82813,
+   "ipfsCid": "bafkreiaz74xj65m7gi42fyw3aarswzk7o5g5leywxmqsigebnk3faqqdy4",
+   "chunks": [
+    {
+     "id": "0xb2f9424803a06a4eab392a047ac07483108af7dc23982ce532bff15f11dc176a",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x806972b3b3b7d37f92e117b834a37e64bf6a9ec86f4e15af317a68e632459309",
+     "dataHash": "0xe8bad1a8f5caa1a665f3e213ed10ea401e81d27fca0ae1aff63da2322b18380a",
+     "size": 24575,
+     "inputLen": 11070
+    },
+    {
+     "id": "0x5770ec76340cce7917ea7ad16b1ab2c3aa13f4f659bbec15228caa688878d420",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x1272f6e2f9418d21f93999de067e45eb4be72e9d6095dc2e1c0b68507a4ee058",
+     "dataHash": "0x51a82b749cbff54ff235626583cc6743c9971ae74bc357d0d9477e6ca57490d1",
+     "size": 23830,
+     "inputLen": 12536
+    },
+    {
+     "id": "0xada7f831cc69307c624941d87ae27c666a566a3ea33f6f16c0f2cceac4e4db13",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x64da2054da54979d6b730d9b5f47d4796ddf16d9d0d7cdaca3f81cde566a14e6",
+     "dataHash": "0xe17c0e3bd4eef1ed930ee86f492fb736a8470a69aa5eaf74a88ef0999a9531c4",
+     "size": 24575,
+     "inputLen": 13330
+    },
+    {
+     "id": "0xfa290aebdbf791391b16895e1d87e798a22816ed78012976e6a1c1de8dc7639b",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xb86d303392d286fcf580a38f3191f5dbe4548d5c076580e6f4ec90d2902ec3e2",
+     "dataHash": "0xfbd19e2e7d650ba49745907de282133f86a919005c199de9b0aebb8bcd089744",
+     "size": 20950,
+     "inputLen": 10546
+    },
+    {
+     "id": "0x63f96e918efd1f2a56761b0955116afcb5887d9bb661c53e66488441780f07fc",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xcee1f9a5d3d21cd83e57bfd80c713da74a1ceefb7f7bd5fd0105d82102c3a461",
+     "dataHash": "0x40d6d12cf8b65cbdbed652ced4178176440779ddddb3cfa6dfacd0065d8ad646",
+     "size": 24575,
+     "inputLen": 12988
+    },
+    {
+     "id": "0xcb2a79f0f6741783f86eed98ab111655b95bb0b34efdaf50e9ea6bd7ff159bad",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xa2612efb838f1026d9efe4a94f7c0c529a09f48f95c6aea7f469c6b891575821",
+     "dataHash": "0xb74df8e7ab4e0a08047d01bc237ca682c6e354397e9cdbb98bf5e4b28ad7e63e",
+     "size": 18615,
+     "inputLen": 10446
+    },
+    {
+     "id": "0x47947e92aa533bf8b47c32a31b7b27e4a64f2ff66802b4bbe3f2692d2e41b3fd",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xb5d98c6eea376677db7d424619e6ab02fe9a8560e8e21771fb3357aeb99c6cb4",
+     "dataHash": "0xc1c44a73b53603cebab74afd55551bb5eef1f5d28b7de8f48af3b174aa4e57a6",
+     "size": 22065,
+     "inputLen": 11222
+    },
+    {
+     "id": "0xa3298e6f354a891af62251197930628da4f123e00a8279078905c5b4db16afb4",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x63f9629d33895c4284036da99e5844a05d3e93c8d8f3f002815263a339beaffa",
+     "dataHash": "0xe2dabdc58c2b4475ad3827b4d282f6532deb3a113e7f9e5231204f0bea68a8e3",
+     "size": 935,
+     "inputLen": 675
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0xb4162210b1cbfb8665b16603f47886785ee39fbd421494197a6e45f3cc4aa0e9",
+    "rootLevel": 0,
+    "count": 8,
+    "nodes": [
+     {
+      "id": "0xb4162210b1cbfb8665b16603f47886785ee39fbd421494197a6e45f3cc4aa0e9",
+      "level": 0,
+      "count": 8,
+      "size": 160120,
+      "childIds": [],
+      "blob": "0x00b2f9424803a06a4eab392a047ac07483108af7dc23982ce532bff15f11dc176a000000005fff5770ec76340cce7917ea7ad16b1ab2c3aa13f4f659bbec15228caa688878d420000000005d16ada7f831cc69307c624941d87ae27c666a566a3ea33f6f16c0f2cceac4e4db13000000005ffffa290aebdbf791391b16895e1d87e798a22816ed78012976e6a1c1de8dc7639b0000000051d663f96e918efd1f2a56761b0955116afcb5887d9bb661c53e66488441780f07fc000000005fffcb2a79f0f6741783f86eed98ab111655b95bb0b34efdaf50e9ea6bd7ff159bad0000000048b747947e92aa533bf8b47c32a31b7b27e4a64f2ff66802b4bbe3f2692d2e41b3fd000000005631a3298e6f354a891af62251197930628da4f123e00a8279078905c5b4db16afb40000000003a7"
+     }
+    ]
+   }
+  },
+  {
+   "path": "deployments.json",
+   "cid": "0x330317189552948b6975ff082073f9bb5611c4ab24676590fff501350a047217",
+   "mimeType": "application/json",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 1102,
+   "dataSize": 1102,
+   "storedSize": 571,
+   "ipfsCid": "bafkreiaob4nxrdrkeyj4h3gghnfxzpt6brlhc366mcp4yowckvgtf45oxu",
+   "chunks": [
+    {
+     "id": "0x093153120bd238cffef9b436fa89c60d210685ede16f86fb3383a6f9d69a5976",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x8f83b9df5209422bf4ca19d4bfe649dccb46d27a4464c43dede872636253f469",
+     "dataHash": "0x924c71fb8e718afa77f6abf2d177ad2d0f0d72923fc0ace454f9db8fadba43f8",
+     "size": 1102,
+     "inputLen": 571
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x3f820462826dbcab54457ae69094e9aa258452c8f78ab258752960a72e292f33",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0x3f820462826dbcab54457ae69094e9aa258452c8f78ab258752960a72e292f33",
+      "level": 0,
+      "count": 1,
+      "size": 1102,
+      "childIds": [],
+      "blob": "0x00093153120bd238cffef9b436fa89c60d210685ede16f86fb3383a6f9d69a597600000000044e"
+     }
+    ]
+   }
+  },
+  {
+   "path": "favicon.svg",
+   "cid": "0x492c70458f0460604460f43da34e952f493c962aae781c6bb89dcbe47e795a0a",
+   "mimeType": "image/svg+xml",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 312,
+   "dataSize": 312,
+   "storedSize": 230,
+   "ipfsCid": "bafkreidopnfutx34s6k6b2vayz6soywnewzosumeo72tvkh6k7ckzr5ppe",
+   "chunks": [
+    {
+     "id": "0x605f8cd2e0d18bfc0f73e0090df62b5617d4f89aa0aa45ee91acefdcd1fe7dc1",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x310d77ecf05a4a16f47dcc7f63bdd8017d79ef7d4982c944df14ebef6a37e04e",
+     "dataHash": "0xe8a2bcc5c632b73ab5b88c5c7b692fdb0509a05961ad20d9d56e93ad1426a1d9",
+     "size": 312,
+     "inputLen": 230
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x0656699d02642d85caf117645da804f7bdc0c0ea2baa6100b6d505c774097fca",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0x0656699d02642d85caf117645da804f7bdc0c0ea2baa6100b6d505c774097fca",
+      "level": 0,
+      "count": 1,
+      "size": 312,
+      "childIds": [],
+      "blob": "0x00605f8cd2e0d18bfc0f73e0090df62b5617d4f89aa0aa45ee91acefdcd1fe7dc1000000000138"
+     }
+    ]
+   }
+  },
+  {
+   "path": "gateway.html",
+   "cid": "0x95be8a1cc309d44dc500bd04241c88401ecc2aaa384fcbd6046de8c509600f28",
+   "mimeType": "text/html",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 5232,
+   "dataSize": 5232,
+   "storedSize": 3200,
+   "ipfsCid": "bafkreidczg2qjncezw54imhg6k7ds3qlpcghrpxdb7awk36pfday3oomti",
+   "chunks": [
+    {
+     "id": "0xdd554a1239ac3a10a5726538b15cca8a17ae9a8bc10c6eed711c67929d7b9f8e",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xf86495bdea38bf477a0bc7a741e42ed840887b352430a68f91f1a1102c2cbf24",
+     "dataHash": "0xbb6d7a6ce8eb299fa0e747caf4502e177f5913ed9879b6cbe4649644fa3682cd",
+     "size": 5232,
+     "inputLen": 3200
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x90036a3fefadd78b813e1432d4afcde73587ee8e16bb24a6c6145419733ed962",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0x90036a3fefadd78b813e1432d4afcde73587ee8e16bb24a6c6145419733ed962",
+      "level": 0,
+      "count": 1,
+      "size": 5232,
+      "childIds": [],
+      "blob": "0x00dd554a1239ac3a10a5726538b15cca8a17ae9a8bc10c6eed711c67929d7b9f8e000000001470"
+     }
+    ]
+   }
+  },
+  {
+   "path": "gateway.js",
+   "cid": "0xa1f53983c46525a2f5404f0d9934062e4e717988577a785b9877b9d4af7af6e8",
+   "mimeType": "application/javascript",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 79376,
+   "dataSize": 79376,
+   "storedSize": 41036,
+   "ipfsCid": "bafkreihjz5rz44c4ptpb3mtfoairpihtxn6hvxhj3utdw3oyje4i564c3q",
+   "chunks": [
+    {
+     "id": "0xa2e7c1459d859a86fe8fed4216daf6cb3bce2e91424fce16fd091e87cc7a1b09",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xe1fd6fad1be870fd68340c651f345daa229f040e2689d2fd3045bdeab41c1dbe",
+     "dataHash": "0xb3756ec8a67ae9485875c47867defef8539cfcf2876e3af90be7275497ed2ebd",
+     "size": 24575,
+     "inputLen": 11157
+    },
+    {
+     "id": "0x598125f0d46f169936be549c859157b435a6565e43ca27fb84feb11462b84ba2",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xd58aa2e95379d4514da5307c8f78d1d03543d49abc336232cd02abecf481f131",
+     "dataHash": "0x0c52e5c3046c11c57481747eed624b2ec4f877ac9ae9fe912d6b499952a23a3b",
+     "size": 23631,
+     "inputLen": 12595
+    },
+    {
+     "id": "0x14a559479bc6df998ba7a7a2c5495a5c40b389b16aa27a1a31aa1c0dd96c6fb3",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xcae2eaa4d99e7df4231a98a9f3e3e59810109a5ff849f762e7c9e092f5d4c182",
+     "dataHash": "0x15aaa07e1f7fe642b83e1b04d6394281f3d515a138fc44dc86e2a086059cbcc6",
+     "size": 24271,
+     "inputLen": 13058
+    },
+    {
+     "id": "0x5a9700942db374caf059958a7896db6e7971244f9a883097977ae97429c5f07b",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x55b9ee71e05cc9285abe7bdf61a0941ebd46d8730514cc0f7559581f8012cc86",
+     "dataHash": "0x9711f1b79f71b6463aec4ced8b7d9a2cef33245ace59ecb0a9f1e37d0b3f938d",
+     "size": 6899,
+     "inputLen": 4226
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0xe1002fafc9ca642fb0724371b75e27abd296b2c83fb26c6f35510cb2c70e9628",
+    "rootLevel": 0,
+    "count": 4,
+    "nodes": [
+     {
+      "id": "0xe1002fafc9ca642fb0724371b75e27abd296b2c83fb26c6f35510cb2c70e9628",
+      "level": 0,
+      "count": 4,
+      "size": 79376,
+      "childIds": [],
+      "blob": "0x00a2e7c1459d859a86fe8fed4216daf6cb3bce2e91424fce16fd091e87cc7a1b09000000005fff598125f0d46f169936be549c859157b435a6565e43ca27fb84feb11462b84ba2000000005c4f14a559479bc6df998ba7a7a2c5495a5c40b389b16aa27a1a31aa1c0dd96c6fb3000000005ecf5a9700942db374caf059958a7896db6e7971244f9a883097977ae97429c5f07b000000001af3"
+     }
+    ]
+   }
+  },
+  {
+   "path": "gateway/README.md",
+   "cid": "0x421d8c8179c48b584d9e46895186d5a91f99b8780f8f0386fec0423aded7ab44",
+   "mimeType": "text/markdown",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 18905,
+   "dataSize": 18905,
+   "storedSize": 11148,
+   "ipfsCid": "bafkreigbjwogbfrl23w3iq57qf75mwtkjdx3i7ial5wy3wqm5pqbmdbaye",
+   "chunks": [
+    {
+     "id": "0x203bf4f4dab6a3453d190544ff16cad5d934445ef0a6fb13a32337be6805e888",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x6d41c74d5097064d1f67cf627feefff5035975d3596e2356bd5133d3dc45cef6",
+     "dataHash": "0x6be2a7057c99dcd64ac48264432388f6d5e635f76ca2f5308697308f345e83a6",
+     "size": 18905,
+     "inputLen": 11148
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x45f15c94f6607509835e836a7bee489a486ec085141ff15b464205d8fd6de723",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0x45f15c94f6607509835e836a7bee489a486ec085141ff15b464205d8fd6de723",
+      "level": 0,
+      "count": 1,
+      "size": 18905,
+      "childIds": [],
+      "blob": "0x00203bf4f4dab6a3453d190544ff16cad5d934445ef0a6fb13a32337be6805e8880000000049d9"
+     }
+    ]
+   }
+  },
+  {
+   "path": "gateway/deploy.mjs",
+   "cid": "0x301d3ca934e6f61c4ce25360ef1804e8ed1911c1d4c9b3d3b2ae08e94e352116",
+   "mimeType": "application/javascript",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 1845,
+   "dataSize": 1845,
+   "storedSize": 1398,
+   "ipfsCid": "bafkreiebe6vxrawbcytslwo3nc3oinjzaw7nrch2aq2dakwol4ogdbihne",
+   "chunks": [
+    {
+     "id": "0x7482033159e9d158d07e8aa3c94b822ae9f69fbd0a0c549d38979a4833f4386d",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xf9d8af6d30d18c46397fcc4e0b6f9f98f269c711fc18f1041577e09e243ac7e6",
+     "dataHash": "0x7d27e43eed973c2cc0ad89814247e206d21cc7b5ec4a657e2afa6bd7bf435ac0",
+     "size": 1845,
+     "inputLen": 1398
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0xa541c4ec54fd253c2027bb1446f78a61fa857f9f7bcaed16f44d52998f63def1",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0xa541c4ec54fd253c2027bb1446f78a61fa857f9f7bcaed16f44d52998f63def1",
+      "level": 0,
+      "count": 1,
+      "size": 1845,
+      "childIds": [],
+      "blob": "0x007482033159e9d158d07e8aa3c94b822ae9f69fbd0a0c549d38979a4833f4386d000000000735"
+     }
+    ]
+   }
+  },
+  {
+   "path": "gateway/worker-template.js",
+   "cid": "0xfa16aae6e96455376986e64d5e5fe42252488a06ff05fab0507e90da9e9ab990",
+   "mimeType": "application/javascript",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 91560,
+   "dataSize": 91560,
+   "storedSize": 47436,
+   "ipfsCid": "bafkreiftdf6mzhpikg2lhwlmmrfuzmlmueqdntrfb3cblgkeatrx7r7zr4",
+   "chunks": [
+    {
+     "id": "0xd753568d226ce932379ee76d44f8fa231a04991f12469a183dabd8794ad9ca3d",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xde269c4e12c3afcb9afb7dca034e86f4ab104ac205007c9665bf5081ce38b75f",
+     "dataHash": "0xb959bdbe16ebf1e285a25110ced6a2075ffe8b9b7f3595f954625486395b3b8d",
+     "size": 24575,
+     "inputLen": 11175
+    },
+    {
+     "id": "0x0847dcd4102219c2630e8edde496253c2930c2ea12c10e2c40995f0086c58467",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xbc13e09cb67582b59457c594364610c005a86506ebd75d8ec79e02a0dc2736c1",
+     "dataHash": "0xd303a15ce974cdd7f123030820c371dc0b01e06dbcfc770c448aa48e111896cd",
+     "size": 20964,
+     "inputLen": 10794
+    },
+    {
+     "id": "0x5fb74b2abb2d72795302939c8894d676a08c8b1218d50d84c877bc1d360a42a3",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x6d6b645907be81dd00a6a0491fd57019ddbf22f87eac00edc82fed032548f267",
+     "dataHash": "0xf3a835ff0d7a6ddf13807e2a2efc71f2b0a057e9d24b749fcc722aa19a98c0ec",
+     "size": 22539,
+     "inputLen": 12443
+    },
+    {
+     "id": "0x1a0ffceb238713ab2e8587b81cbbdcd8631da02c17c756525b7524ee8a0d07f9",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x7908a7b27b53c416691434c149af9b11a594066836c674a5ec783a476c0051b9",
+     "dataHash": "0x51f6a4eff65814a74b1044f0335f282d9391ca2b620cd427c7ebb1dd05afe135",
+     "size": 22144,
+     "inputLen": 11918
+    },
+    {
+     "id": "0x20520a9a99d5d9468b078ed4fa9ef15bb7ba8ad513efd8c18afc5d4929e156b3",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x484a5f3618b651f6b02501816b9196b8b3d6debb784fea83c6f3b2734fb2006f",
+     "dataHash": "0x640fdaf4ec031eedf71ccb75a1f94bf2988a3503f1b5330d415cec320a598cca",
+     "size": 1338,
+     "inputLen": 1106
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x33d86b9e59ab0e4014553bd1fe8bfae8f0ddfa6bee2eea94429924b83a07950b",
+    "rootLevel": 0,
+    "count": 5,
+    "nodes": [
+     {
+      "id": "0x33d86b9e59ab0e4014553bd1fe8bfae8f0ddfa6bee2eea94429924b83a07950b",
+      "level": 0,
+      "count": 5,
+      "size": 91560,
+      "childIds": [],
+      "blob": "0x00d753568d226ce932379ee76d44f8fa231a04991f12469a183dabd8794ad9ca3d000000005fff0847dcd4102219c2630e8edde496253c2930c2ea12c10e2c40995f0086c584670000000051e45fb74b2abb2d72795302939c8894d676a08c8b1218d50d84c877bc1d360a42a300000000580b1a0ffceb238713ab2e8587b81cbbdcd8631da02c17c756525b7524ee8a0d07f900000000568020520a9a99d5d9468b078ed4fa9ef15bb7ba8ad513efd8c18afc5d4929e156b300000000053a"
+     }
+    ]
+   }
+  },
+  {
+   "path": "index.html",
+   "cid": "0x394e4ddd84fa53fdb7956223c4c6457ffa0a2116bc4b304703763e1d5e45c42d",
+   "mimeType": "text/html",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 10883,
+   "dataSize": 10883,
+   "storedSize": 5468,
+   "ipfsCid": "bafkreihv5d4f62xrunuefibgu54otfx32d34wadurei7isvdebicyou424",
+   "chunks": [
+    {
+     "id": "0x05d57bb4e3a0a5c9dfae97a06912c2a89b281f63579632ea47655238874123dc",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x4e43b29000174612d4e5cb3c7c29f0228b95f1e70e05b4fedcc173c1c8d40c08",
+     "dataHash": "0xb300507c0814547a234bff2e50c06815446788da516c710cb21b756e98145b37",
+     "size": 10883,
+     "inputLen": 5468
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x6305a9b2caca8a97fd8e53f8e3c423c9c767b5e3c3d9ff1207c7f99c263c3064",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0x6305a9b2caca8a97fd8e53f8e3c423c9c767b5e3c3d9ff1207c7f99c263c3064",
+      "level": 0,
+      "count": 1,
+      "size": 10883,
+      "childIds": [],
+      "blob": "0x0005d57bb4e3a0a5c9dfae97a06912c2a89b281f63579632ea47655238874123dc000000002a83"
+     }
+    ]
+   }
+  },
+  {
+   "path": "learn.html",
+   "cid": "0x76b7a73cab1ab8f07819a282d868509b636ac87347ee81cc53d9228e27800758",
+   "mimeType": "text/html",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 25040,
+   "dataSize": 25040,
+   "storedSize": 13696,
+   "ipfsCid": "bafkreiaq7wrpz554u5w3v644dzlx4etfhljhk7aai53td2m4rc4aobddha",
+   "chunks": [
+    {
+     "id": "0xcd5c86545149dabde699781ce430ed4fa86912e64ce487b0d7a26dcd64cd7509",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xdfb9f7f5a3968e5eb6012910216e1b550b149ead82ca9beef3ce25b1098f18a7",
+     "dataHash": "0xc6547a6f8c087085758a7eedf79a6b36ba89417a1809e4b497295e597fa24411",
+     "size": 22223,
+     "inputLen": 11787
+    },
+    {
+     "id": "0x7967b5e9544748ccae7427b256b6ddf93d5d587727090888394303b84d8b7865",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x75e212ffefd04c08709f75c0f39b6d7878244510c6b46890feaee78871b1f7c3",
+     "dataHash": "0x508aef40b7ba3b9fc9dedfd1672e322ff44f360773ce65bc927e1189371d9aa0",
+     "size": 2817,
+     "inputLen": 1909
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x1ea3d5ddfe33560622c86e15feb68e57d77d8eb822a7d815f55cca71a208ab5b",
+    "rootLevel": 0,
+    "count": 2,
+    "nodes": [
+     {
+      "id": "0x1ea3d5ddfe33560622c86e15feb68e57d77d8eb822a7d815f55cca71a208ab5b",
+      "level": 0,
+      "count": 2,
+      "size": 25040,
+      "childIds": [],
+      "blob": "0x00cd5c86545149dabde699781ce430ed4fa86912e64ce487b0d7a26dcd64cd75090000000056cf7967b5e9544748ccae7427b256b6ddf93d5d587727090888394303b84d8b7865000000000b01"
+     }
+    ]
+   }
+  },
+  {
+   "path": "llms.txt",
+   "cid": "0x6ff87b348ce8c31606c5f5295e1609a620f21cf72fef959e41bec6c98ac9d9b2",
+   "mimeType": "text/plain",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 14189,
+   "dataSize": 14189,
+   "storedSize": 8490,
+   "ipfsCid": "bafkreig5gbbhnwpchpxwlvyaw6ipj6m2exaaa4dfjzrtkyjhubr4sbqssy",
+   "chunks": [
+    {
+     "id": "0x6a2d1e1dfd9df3ec07b2d80adf9c9e5b8df300c04702d88dae61fea26a24030f",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x0ac0e2e3dc192c5182a9269ac1772583a907db128e74f9cb2266472039ebf394",
+     "dataHash": "0xe122b241341be294585834f263d210146920e0fbdc8e36c5f2105b2c3a8cfddf",
+     "size": 14189,
+     "inputLen": 8490
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0xf1809804503a6f3a2b5c4ea7f718b40dcc20166fdd6284cba0507eef3c144cba",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0xf1809804503a6f3a2b5c4ea7f718b40dcc20166fdd6284cba0507eef3c144cba",
+      "level": 0,
+      "count": 1,
+      "size": 14189,
+      "childIds": [],
+      "blob": "0x006a2d1e1dfd9df3ec07b2d80adf9c9e5b8df300c04702d88dae61fea26a24030f00000000376d"
+     }
+    ]
+   }
+  },
+  {
+   "path": "orgs.json",
+   "cid": "0x95ced33cbbdf7f280bf6c0159e8d53bc79b338c3fe7da5bf76d406a08bf44184",
+   "mimeType": "application/json",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 452,
+   "dataSize": 452,
+   "storedSize": 403,
+   "ipfsCid": "bafkreiefxzptqte3wwnkhkdfv4lbhdtrr7qkuewaxlkxdbvuwlvwr67qki",
+   "chunks": [
+    {
+     "id": "0xc9d353414e508ca8fef75334188139a6d518546bb5cfe8967441ae4475ee4160",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xf8ee73df4c054dfecf2b8cf929b2fa7048293b4e2ee6422b18ec189873d6f5bc",
+     "dataHash": "0x47d4539d926806be21434b9366dc5269aad2cfa38e9a3a42f2f04f515d8d86c2",
+     "size": 452,
+     "inputLen": 403
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x7f6077f9c7b1f8cf30bb4fbb4670fd8dd1386a889f8ff217f5ec1021cc464114",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0x7f6077f9c7b1f8cf30bb4fbb4670fd8dd1386a889f8ff217f5ec1021cc464114",
+      "level": 0,
+      "count": 1,
+      "size": 452,
+      "childIds": [],
+      "blob": "0x00c9d353414e508ca8fef75334188139a6d518546bb5cfe8967441ae4475ee41600000000001c4"
+     }
+    ]
+   }
+  },
+  {
+   "path": "spec/find3r-v0.md",
+   "cid": "0x960cfda4d870b31b9758eb78f56600d83768a4f6b0f5f83b1b60d62978c13ca3",
+   "mimeType": "text/markdown",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 18683,
+   "dataSize": 18683,
+   "storedSize": 11947,
+   "ipfsCid": "bafkreieuema2xkujxcy76rflgpqz6p3ao7sm63pk725kag6g2n5ilf7ruy",
+   "chunks": [
+    {
+     "id": "0xb2fe44b9454f124e6a57a28a7c5dbb8fc93a489c3eeebcb748ad3054b4f352ef",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x7c7094bbc6b7b303d1a0a34f7728ff8932657ff9744e6fe1a23964b124614c9e",
+     "dataHash": "0xb2b500b037fa5fc7b59807fecf28db8e3f671fc2db6998641b5cc8d8ab0f9bda",
+     "size": 16683,
+     "inputLen": 10327
+    },
+    {
+     "id": "0xf11b00f9bed34cffa0c1535bbbbf2dc104e46f7a39bc27639c86345a120eeace",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xd50298d69dbf93f530b34ae1a59cd98fc2cbc2bafb5fdb5d70900fc0aebe8a8f",
+     "dataHash": "0xa28bbd6dc4e6e039790bbdfd38e853939b1a42c643b9eea052cde42832d75b8e",
+     "size": 2000,
+     "inputLen": 1620
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x6885286cee18f8edb40ac26c3c1dad1ac945da3552e904c226bf54b827b1fe28",
+    "rootLevel": 0,
+    "count": 2,
+    "nodes": [
+     {
+      "id": "0x6885286cee18f8edb40ac26c3c1dad1ac945da3552e904c226bf54b827b1fe28",
+      "level": 0,
+      "count": 2,
+      "size": 18683,
+      "childIds": [],
+      "blob": "0x00b2fe44b9454f124e6a57a28a7c5dbb8fc93a489c3eeebcb748ad3054b4f352ef00000000412bf11b00f9bed34cffa0c1535bbbbf2dc104e46f7a39bc27639c86345a120eeace0000000007d0"
+     }
+    ]
+   }
+  },
+  {
+   "path": "spec/site-v0.md",
+   "cid": "0xbc24e8a7e1a6d861549771cdd9890a6009261bf555ce9746398028a684fc255d",
+   "mimeType": "text/markdown",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 11958,
+   "dataSize": 11958,
+   "storedSize": 7566,
+   "ipfsCid": "bafkreiemuzlkzjwod3hyfsx7ut6lu3gozvh5nvjcnasojloctsaegjiuwm",
+   "chunks": [
+    {
+     "id": "0xb412a6e9a7600d1677fbfda88902eb8f4bb2bbac47053877c10766dc410be8ac",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x1a2c85b20f7e46ff10edc34a5a99fe87f0b217f3ba2eb239744d0bcdaddc9702",
+     "dataHash": "0x51eb6342a5b54eee1a6e89ecc967dc1394082813be87a3f10e1010dfa7c0b023",
+     "size": 11958,
+     "inputLen": 7566
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x7547e6c004b10d0cc9353ecdf8554adf0c50d67c41bd3985ea48dc722a13025c",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0x7547e6c004b10d0cc9353ecdf8554adf0c50d67c41bd3985ea48dc722a13025c",
+      "level": 0,
+      "count": 1,
+      "size": 11958,
+      "childIds": [],
+      "blob": "0x00b412a6e9a7600d1677fbfda88902eb8f4bb2bbac47053877c10766dc410be8ac000000002eb6"
+     }
+    ]
+   }
+  },
+  {
+   "path": "viewer.html",
+   "cid": "0x193046387af113169585cb97d093749a875beb2814402012c415eabb4fb3efc3",
+   "mimeType": "text/html",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 1285,
+   "dataSize": 1285,
+   "storedSize": 950,
+   "ipfsCid": "bafkreieyhovre76jhakh7wafqjeegogwcrrth7mnybq5p25zfxrvdssbgi",
+   "chunks": [
+    {
+     "id": "0x72c09ae998931b7b89ab1eaf31873a7d522dd1a0074f863f4bff88b05ab2165b",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xe03b8ea279ebb24d29dbcdbcad6ffe41f8bddf0582be88f9e700acdde27530cc",
+     "dataHash": "0x328723f22e415bad66f98dce393252b34a6f24201fced97286c9e7d4cbfce3cf",
+     "size": 1285,
+     "inputLen": 950
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0x6e117890dfba892d5786d3d64e59690070b10e114408b5f17924df200f2d24d6",
+    "rootLevel": 0,
+    "count": 1,
+    "nodes": [
+     {
+      "id": "0x6e117890dfba892d5786d3d64e59690070b10e114408b5f17924df200f2d24d6",
+      "level": 0,
+      "count": 1,
+      "size": 1285,
+      "childIds": [],
+      "blob": "0x0072c09ae998931b7b89ab1eaf31873a7d522dd1a0074f863f4bff88b05ab2165b000000000505"
+     }
+    ]
+   }
+  },
+  {
+   "path": "viewer.js",
+   "cid": "0xbd68b656a0e5f8dba50611035b6216e2e5725d92a2e81fe638d86c50953083b9",
+   "mimeType": "application/javascript",
+   "codec": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "outputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "logicalSize": 97624,
+   "dataSize": 97624,
+   "storedSize": 51330,
+   "ipfsCid": "bafkreihkrbxse6n5ot74dsqts5vxkwgy76vkpm4cfdtyd2ku3226virwai",
+   "chunks": [
+    {
+     "id": "0x06cfa9ed6210664a6dc1f8c785ceccc61d587a145517eef7a385e48c16b8eda5",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x2c4b330b995d307eae72e1e5b8e4c07adebd190c42e7fa6b8620b012ae094565",
+     "dataHash": "0x3093f133b422180d1a33314509dd433218982773aa9d4516dffa772f1d276087",
+     "size": 24575,
+     "inputLen": 11128
+    },
+    {
+     "id": "0xeb190146c5257bd3ec1893a9f4bd4bc21ec5955080bba4488001499155f38343",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x094e61d4ea8e396d565bb44a83b2d2e036dca81daad84f4d1e197fcc3697bec8",
+     "dataHash": "0x9f00d7a2918ddbc5c551b2531a9126e5d0c7a176fee77890bfd982433096817c",
+     "size": 12545,
+     "inputLen": 7152
+    },
+    {
+     "id": "0x8cf994b7cc5760aec95892a50ad8927805a95df92559ff996815ad9048362742",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0xe84a4df4d2abd3350e74c99462e2b64528d5e430bc7ff54b7eabd8fbbc3533f9",
+     "dataHash": "0xdd6a6fc2a3fe7978bfe77ee13ff6269036bd2375a6e20fb8f65ddf08d6ace60c",
+     "size": 23201,
+     "inputLen": 11827
+    },
+    {
+     "id": "0xa09f797e68845169fc7af7b4dde2b0eb16ddf4b7124ec3527865a7cc7c6c74b7",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x42e0ddca4ff57abaa0ffb811a12cea4e133db7445ab2446a7f23af756a1364be",
+     "dataHash": "0x6aa2c29bcf9239b83db3059862cb8ae8f221974088187246b2a05bad0003ab4e",
+     "size": 24575,
+     "inputLen": 13348
+    },
+    {
+     "id": "0x25c234ba02f87426de0401587ae0893f33977b6555742fe2b8d452b12f236234",
+     "backend": "0x80a4Ec4A4F98358022A5a060F7cB467188fb68E1",
+     "inputHash": "0x7ed11623498c411eec741c4a300a3be0a0953d625a1a6d64fc7d91d508b1c71c",
+     "dataHash": "0x3e9a12495bf5d05245e51996bbaa10c92ae6286bd73e3494a3f917c87044e5f0",
+     "size": 12728,
+     "inputLen": 7875
+    }
+   ],
+   "tree": {
+    "kind": "chunks",
+    "root": "0xe8545e9863937256a2310299e8818da7ec6acecaa5146ecf57ec5de79c02b370",
+    "rootLevel": 0,
+    "count": 5,
+    "nodes": [
+     {
+      "id": "0xe8545e9863937256a2310299e8818da7ec6acecaa5146ecf57ec5de79c02b370",
+      "level": 0,
+      "count": 5,
+      "size": 97624,
+      "childIds": [],
+      "blob": "0x0006cfa9ed6210664a6dc1f8c785ceccc61d587a145517eef7a385e48c16b8eda5000000005fffeb190146c5257bd3ec1893a9f4bd4bc21ec5955080bba4488001499155f383430000000031018cf994b7cc5760aec95892a50ad8927805a95df92559ff996815ad9048362742000000005aa1a09f797e68845169fc7af7b4dde2b0eb16ddf4b7124ec3527865a7cc7c6c74b7000000005fff25c234ba02f87426de0401587ae0893f33977b6555742fe2b8d452b12f2362340000000031b8"
+     }
+    ]
+   }
+  }
+ ],
+ "directories": [
+  {
+   "path": "agent",
+   "cid": "0xe833839f7a65ab88d332c529a2068775578e4744c5a213261ab4a573123e984c",
+   "height": 0,
+   "entries": [
+    {
+     "name": "recover.mjs",
+     "kind": "file",
+     "cid": "0xf4c300bbdf1b6b3834eda79e83a6c29e1417ea6620183f4aea0513bdacc36dcd"
+    },
+    {
+     "name": "serve.mjs",
+     "kind": "file",
+     "cid": "0xc7ce45bb3168b5f5c776dab789422cbdff291ed7cd75289ee5a11ae69124f6e2"
+    }
+   ],
+   "tree": {
+    "kind": "entries",
+    "root": "0xba6df89e92a8aafe39159d9cff6c6ae8b8e93ba6e55ca63ea62aaeccf6c2a2f7",
+    "rootLevel": 0,
+    "count": 2,
+    "nodes": [
+     {
+      "id": "0xba6df89e92a8aafe39159d9cff6c6ae8b8e93ba6e55ca63ea62aaeccf6c2a2f7",
+      "level": 0,
+      "count": 2,
+      "size": 0,
+      "childIds": [],
+      "blob": "0x0000020000002d0b7265636f7665722e6d6a7300f4c300bbdf1b6b3834eda79e83a6c29e1417ea6620183f4aea0513bdacc36dcd0973657276652e6d6a7300c7ce45bb3168b5f5c776dab789422cbdff291ed7cd75289ee5a11ae69124f6e2"
+     }
+    ]
+   }
+  },
+  {
+   "path": "gateway",
+   "cid": "0x5f13ac407bbe509b6ed1a4c20227a9a9a421226131d63d95dad26ac413fea24d",
+   "height": 0,
+   "entries": [
+    {
+     "name": "README.md",
+     "kind": "file",
+     "cid": "0x421d8c8179c48b584d9e46895186d5a91f99b8780f8f0386fec0423aded7ab44"
+    },
+    {
+     "name": "deploy.mjs",
+     "kind": "file",
+     "cid": "0x301d3ca934e6f61c4ce25360ef1804e8ed1911c1d4c9b3d3b2ae08e94e352116"
+    },
+    {
+     "name": "worker-template.js",
+     "kind": "file",
+     "cid": "0xfa16aae6e96455376986e64d5e5fe42252488a06ff05fab0507e90da9e9ab990"
+    }
+   ],
+   "tree": {
+    "kind": "entries",
+    "root": "0xdded20c14ebf901560f707c3d95a2bea5c6e99256da49ebc671cbd1476ad8159",
+    "rootLevel": 0,
+    "count": 3,
+    "nodes": [
+     {
+      "id": "0xdded20c14ebf901560f707c3d95a2bea5c6e99256da49ebc671cbd1476ad8159",
+      "level": 0,
+      "count": 3,
+      "size": 0,
+      "childIds": [],
+      "blob": "0x0000030000002b005709524541444d452e6d6400421d8c8179c48b584d9e46895186d5a91f99b8780f8f0386fec0423aded7ab440a6465706c6f792e6d6a7300301d3ca934e6f61c4ce25360ef1804e8ed1911c1d4c9b3d3b2ae08e94e35211612776f726b65722d74656d706c6174652e6a7300fa16aae6e96455376986e64d5e5fe42252488a06ff05fab0507e90da9e9ab990"
+     }
+    ]
+   }
+  },
+  {
+   "path": "spec",
+   "cid": "0xb8ffeb126f0c51954d4c31248f6f94cca370f460306bf988a7b4c7ad3866075f",
+   "height": 0,
+   "entries": [
+    {
+     "name": "find3r-v0.md",
+     "kind": "file",
+     "cid": "0x960cfda4d870b31b9758eb78f56600d83768a4f6b0f5f83b1b60d62978c13ca3"
+    },
+    {
+     "name": "site-v0.md",
+     "kind": "file",
+     "cid": "0xbc24e8a7e1a6d861549771cdd9890a6009261bf555ce9746398028a684fc255d"
+    }
+   ],
+   "tree": {
+    "kind": "entries",
+    "root": "0xe05c0ffc45a5159180466b21256ac72b3b3843fb5b87ec8eae6314f923e30fad",
+    "rootLevel": 0,
+    "count": 2,
+    "nodes": [
+     {
+      "id": "0xe05c0ffc45a5159180466b21256ac72b3b3843fb5b87ec8eae6314f923e30fad",
+      "level": 0,
+      "count": 2,
+      "size": 0,
+      "childIds": [],
+      "blob": "0x0000020000002e0c66696e6433722d76302e6d6400960cfda4d870b31b9758eb78f56600d83768a4f6b0f5f83b1b60d62978c13ca30a736974652d76302e6d6400bc24e8a7e1a6d861549771cdd9890a6009261bf555ce9746398028a684fc255d"
+     }
+    ]
+   }
+  },
+  {
+   "path": "",
+   "cid": "0x49a02353d517250c6bec477c3a5c7928992d474b15f1f753f382b57f3b822d13",
+   "height": 1,
+   "entries": [
+    {
+     "name": "AGENTS.md",
+     "kind": "file",
+     "cid": "0x0e1d5defee0b3392e5fa3d39903a522635f13fc9d6ae385e31f766439f97c910"
+    },
+    {
+     "name": "THIRD_PARTY_NOTICES.txt",
+     "kind": "file",
+     "cid": "0x9f5cadf2d31d4cc2e6f923d9c1d0ae3c79a63549ab5f6003b59066eaca47b295"
+    },
+    {
+     "name": "agent",
+     "kind": "directory",
+     "cid": "0xe833839f7a65ab88d332c529a2068775578e4744c5a213261ab4a573123e984c"
+    },
+    {
+     "name": "app.css",
+     "kind": "file",
+     "cid": "0x34698a5d19a661c35a333d17f65d61252a0d89fcfa0b8485016a186281109a1b"
+    },
+    {
+     "name": "app.js",
+     "kind": "file",
+     "cid": "0x64a57d9f9d48da5b9e06bdd952def511e714d8251ebd93a8592cf09abd20bab4"
+    },
+    {
+     "name": "artwork.html",
+     "kind": "file",
+     "cid": "0x8f48e783d29af6a69184befbd8104671d3532096c65457f2048eee6fbfc139a2"
+    },
+    {
+     "name": "artwork.js",
+     "kind": "file",
+     "cid": "0xb5b0e8927367a8618e946ed1a386140422a37341685179a34fcde5a0fb77c77a"
+    },
+    {
+     "name": "deployments.json",
+     "kind": "file",
+     "cid": "0x330317189552948b6975ff082073f9bb5611c4ab24676590fff501350a047217"
+    },
+    {
+     "name": "favicon.svg",
+     "kind": "file",
+     "cid": "0x492c70458f0460604460f43da34e952f493c962aae781c6bb89dcbe47e795a0a"
+    },
+    {
+     "name": "gateway",
+     "kind": "directory",
+     "cid": "0x5f13ac407bbe509b6ed1a4c20227a9a9a421226131d63d95dad26ac413fea24d"
+    },
+    {
+     "name": "gateway.html",
+     "kind": "file",
+     "cid": "0x95be8a1cc309d44dc500bd04241c88401ecc2aaa384fcbd6046de8c509600f28"
+    },
+    {
+     "name": "gateway.js",
+     "kind": "file",
+     "cid": "0xa1f53983c46525a2f5404f0d9934062e4e717988577a785b9877b9d4af7af6e8"
+    },
+    {
+     "name": "index.html",
+     "kind": "file",
+     "cid": "0x394e4ddd84fa53fdb7956223c4c6457ffa0a2116bc4b304703763e1d5e45c42d"
+    },
+    {
+     "name": "learn.html",
+     "kind": "file",
+     "cid": "0x76b7a73cab1ab8f07819a282d868509b636ac87347ee81cc53d9228e27800758"
+    },
+    {
+     "name": "llms.txt",
+     "kind": "file",
+     "cid": "0x6ff87b348ce8c31606c5f5295e1609a620f21cf72fef959e41bec6c98ac9d9b2"
+    },
+    {
+     "name": "orgs.json",
+     "kind": "file",
+     "cid": "0x95ced33cbbdf7f280bf6c0159e8d53bc79b338c3fe7da5bf76d406a08bf44184"
+    },
+    {
+     "name": "spec",
+     "kind": "directory",
+     "cid": "0xb8ffeb126f0c51954d4c31248f6f94cca370f460306bf988a7b4c7ad3866075f"
+    },
+    {
+     "name": "viewer.html",
+     "kind": "file",
+     "cid": "0x193046387af113169585cb97d093749a875beb2814402012c415eabb4fb3efc3"
+    },
+    {
+     "name": "viewer.js",
+     "kind": "file",
+     "cid": "0xbd68b656a0e5f8dba50611035b6216e2e5725d92a2e81fe638d86c50953083b9"
+    }
+   ],
+   "tree": {
+    "kind": "entries",
+    "root": "0x70862a9ca213b885155d7c481b553bc01d442b5fd4c23ce0fd2a39b74a80018f",
+    "rootLevel": 0,
+    "count": 19,
+    "nodes": [
+     {
+      "id": "0x70862a9ca213b885155d7c481b553bc01d442b5fd4c23ce0fd2a39b74a80018f",
+      "level": 0,
+      "count": 19,
+      "size": 0,
+      "childIds": [],
+      "blob": "0x0000130000002b0064008b00b400dc010a01360168019501be01ec021802440270029a02c502eb0318094147454e54532e6d64000e1d5defee0b3392e5fa3d39903a522635f13fc9d6ae385e31f766439f97c9101754484952445f50415254595f4e4f54494345532e747874009f5cadf2d31d4cc2e6f923d9c1d0ae3c79a63549ab5f6003b59066eaca47b295056167656e7401e833839f7a65ab88d332c529a2068775578e4744c5a213261ab4a573123e984c076170702e6373730034698a5d19a661c35a333d17f65d61252a0d89fcfa0b8485016a186281109a1b066170702e6a730064a57d9f9d48da5b9e06bdd952def511e714d8251ebd93a8592cf09abd20bab40c617274776f726b2e68746d6c008f48e783d29af6a69184befbd8104671d3532096c65457f2048eee6fbfc139a20a617274776f726b2e6a7300b5b0e8927367a8618e946ed1a386140422a37341685179a34fcde5a0fb77c77a106465706c6f796d656e74732e6a736f6e00330317189552948b6975ff082073f9bb5611c4ab24676590fff501350a0472170b66617669636f6e2e73766700492c70458f0460604460f43da34e952f493c962aae781c6bb89dcbe47e795a0a0767617465776179015f13ac407bbe509b6ed1a4c20227a9a9a421226131d63d95dad26ac413fea24d0c676174657761792e68746d6c0095be8a1cc309d44dc500bd04241c88401ecc2aaa384fcbd6046de8c509600f280a676174657761792e6a7300a1f53983c46525a2f5404f0d9934062e4e717988577a785b9877b9d4af7af6e80a696e6465782e68746d6c00394e4ddd84fa53fdb7956223c4c6457ffa0a2116bc4b304703763e1d5e45c42d0a6c6561726e2e68746d6c0076b7a73cab1ab8f07819a282d868509b636ac87347ee81cc53d9228e27800758086c6c6d732e747874006ff87b348ce8c31606c5f5295e1609a620f21cf72fef959e41bec6c98ac9d9b2096f7267732e6a736f6e0095ced33cbbdf7f280bf6c0159e8d53bc79b338c3fe7da5bf76d406a08bf44184047370656301b8ffeb126f0c51954d4c31248f6f94cca370f460306bf988a7b4c7ad3866075f0b7669657765722e68746d6c00193046387af113169585cb97d093749a875beb2814402012c415eabb4fb3efc3097669657765722e6a7300bd68b656a0e5f8dba50611035b6216e2e5725d92a2e81fe638d86c50953083b9"
+     }
+    ]
+   }
+  }
+ ]
+}

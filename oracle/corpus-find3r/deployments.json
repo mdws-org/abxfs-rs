@@ -1,0 +1,30 @@
+[
+  {
+    "id": "bamfs-base-2026-10",
+    "name": "BAMFS on Base",
+    "chainId": 8453,
+    "collection": "0x10ddfcbcd62e784c522d0b466ed109fc65b2a855",
+    "rpc": "https://base-rpc.publicnode.com",
+    "stores": {
+      "content": "0xd4a0FFa88a58ee7Bb7e802E7079EE90C8DA52250",
+      "file": "0xaa79Ce91da95367fD79bF5d718B055d31EB9CfD3",
+      "directory": "0x16FA2Ecac2B898FB91dc17bae843C7D0E6d8531f",
+      "hook": "0xc2Aa83414a6860b6e6Fd9151ea4e53fC3A0bdb28",
+      "enumeration": "0xDa9bA88eC0cA3cFf7F2E59dC1504d641a9883E7E"
+    }
+  },
+  {
+    "id": "bamfs-base-sepolia-2026-10",
+    "name": "BAMFS on Base Sepolia",
+    "chainId": 84532,
+    "collection": "0x7015ab36fa7d62daf286561114e7f3c250511e31",
+    "rpc": "https://base-sepolia-rpc.publicnode.com",
+    "stores": {
+      "content": "0xd4a0FFa88a58ee7Bb7e802E7079EE90C8DA52250",
+      "file": "0xaa79Ce91da95367fD79bF5d718B055d31EB9CfD3",
+      "directory": "0x16FA2Ecac2B898FB91dc17bae843C7D0E6d8531f",
+      "hook": "0xc2Aa83414a6860b6e6Fd9151ea4e53fC3A0bdb28",
+      "enumeration": "0xDa9bA88eC0cA3cFf7F2E59dC1504d641a9883E7E"
+    }
+  }
+]

@@ -1,0 +1,10 @@
+# Response headers for fs.abx.thebenmeadows.com (Cloudflare Pages format).
+# Every file revalidates on each load, so a new deploy is picked up at once. The checker runs a
+# WebAssembly module from this origin ('wasm-unsafe-eval') and reads chain state from public RPCs.
+
+/*
+  Cache-Control: public, max-age=0, must-revalidate
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

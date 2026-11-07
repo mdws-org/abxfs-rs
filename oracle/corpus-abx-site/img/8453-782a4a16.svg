@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200">
+  <rect width="1200" height="1200" fill="#e8b36a"/>
+  <circle cx="600" cy="410" r="190" fill="#ef5b3f"/>
+  <path d="M0 690 210 590 390 680 610 545 815 670 1010 575 1200 660V1200H0Z" fill="#733f32"/>
+  <path d="M0 820 260 720 455 800 680 685 925 795 1200 710V1200H0Z" fill="#312f35"/>
+  <path d="M0 955C210 900 395 990 600 930s390 25 600-40v310H0Z" fill="#c88a4b"/>
+  <text x="600" y="1080" fill="#f7ead4" font-family="monospace" font-size="42" text-anchor="middle">ABX · BASE · SPONSORED</text>
+</svg>

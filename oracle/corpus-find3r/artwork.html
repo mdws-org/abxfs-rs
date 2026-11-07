@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Take a closer look at an artwork, explore its features, or open the live view.">
+  <title>Artwork — find3r</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="./app.css">
+  <link rel="help" href="./AGENTS.md" type="text/markdown"><script type="module" src="./artwork.js"></script>
+</head>
+<body class="artwork-body">
+  <header class="desktop-header"><a class="wordmark" href="./">find<span>3</span>r<span class="dot">.</span></a><span>A little window into the onchain web.</span><a href="./" id="back-to-folders">← Back to folders</a></header>
+  <main class="window artwork-window" aria-label="Artwork details">
+    <div class="titlebar"><span class="window-mark" aria-hidden="true"></span><h1 id="art-window-title">A closer look</h1><span id="art-provider" class="title-note">ARTWORK</span></div>
+    <div class="artwork-layout">
+      <section class="artwork-preview" aria-label="Static artwork image">
+        <button id="image-preview" class="artwork-image-button" aria-label="View image full screen" disabled><img id="artwork-image" alt="Artwork preview" referrerpolicy="no-referrer" hidden></button>
+        <div id="artwork-media" class="artwork-media" hidden></div><a id="original-media" class="button-link" target="_blank" rel="noopener noreferrer" hidden>Open file ↗</a><p id="image-status" role="status">Loading the image…</p>
+      </section>
+      <section class="artwork-info" aria-labelledby="artwork-title">
+        <span class="eyebrow">A LITTLE ART BREAK</span><h2 id="artwork-title">Artwork</h2><p id="artwork-artist" class="artwork-artist">Getting the details…</p>
+        <div class="artwork-actions"><a id="live-view" class="primary button-link" target="_blank" rel="noopener noreferrer" aria-disabled="true">Open live view ↗</a><button id="full-image" disabled>View image full screen</button><button id="async-open" class="primary" hidden>View current image</button></div>
+        <section id="async-info" class="artwork-about" hidden><h3>A changing artwork</h3><p id="async-note"></p><dl id="async-controls" class="feature-list"></dl></section>
+        <a id="vessel-open" class="button-link" hidden>Explore Vessel contents ↗</a>
+        <a id="external-page" class="button-link" target="_blank" rel="noopener noreferrer" hidden>Visit website ↗</a><a id="save-source" class="button-link" download hidden>Save original drawing instructions</a><div class="artwork-share"><a id="collection-link">View collection ↗</a><button id="copy-art-link">Copy artwork link</button></div><label id="art-share" hidden>Artwork link<input id="art-share-link" readonly></label><p class="artwork-hint">Enjoy the still image, or watch the artwork come to life.</p>
+        <div id="metadata-error" class="artwork-notice" role="status" hidden><p></p><button id="retry-metadata">Try again</button></div>
+        <div id="connection-help" class="artwork-notice" role="status" hidden><p id="connection-reason"></p><button id="choose-artwork-rpc">Choose another connection</button> <button id="retry-connection">Try again</button><p class="muted">An RPC is a connection to the blockchain. Changing it needs no wallet or transaction.</p></div>
+        <section class="artwork-features" aria-labelledby="features-title"><h3 id="features-title">Features</h3><p id="features-status" role="status">Loading features…</p><dl id="feature-list" class="feature-list"></dl></section>
+        <section id="artwork-about" class="artwork-about" hidden><h3>About this work</h3><p id="artwork-description"></p></section>
+        <details class="artwork-details"><summary>More about this piece</summary><dl id="piece-details"></dl><p id="provider-note" class="muted">Details and previews use public collection services.</p></details>
+      </section>
+    </div>
+    <footer class="statusbar"><span id="artwork-status" role="status">Getting your artwork ready.</span><a id="piece-guide" href="./learn.html#scope">How it works ↗</a></footer>
+  </main>
+  <dialog id="image-dialog" class="image-dialog" aria-label="Artwork image full screen"><div class="image-dialog-bar"><span id="image-title">Artwork</span><a id="original-image" target="_blank" rel="noopener noreferrer">Open original image ↗</a><button id="close-image" aria-label="Close full-screen image">Close ×</button></div><img id="fullscreen-image" alt="Artwork" referrerpolicy="no-referrer"></dialog>
+  <dialog id="async-dialog" class="async-dialog" aria-label="Current Async image"><div class="image-dialog-bar"><strong>Async · current image</strong><button id="async-close">Close ×</button></div><p id="async-status" role="status"></p><div id="async-stage" aria-label="Assembled artwork"></div><details><summary>Layers in this image</summary><ul id="async-layer-list"></ul></details></dialog>
+  <dialog id="artwork-rpc-dialog"><form id="artwork-rpc-form"><div class="dialog-title"><h2>Try another connection</h2><button type="button" id="close-artwork-rpc" aria-label="Close">×</button></div><p>Some artworks take more work to generate than a shared connection allows. Your own connection may allow more. Providers can still have their own limits.</p><label><span id="artwork-rpc-label">Blockchain connection (RPC)</span><input id="artwork-rpc-url" autocomplete="off" spellcheck="false" placeholder="https://your-rpc-provider/…"></label><small>Leave blank to use the default connection. Your URL stays outside any artwork you open.</small><p><button type="button" id="artwork-public-rpc">Try a free public connection</button></p><p id="artwork-rpc-error" class="error" role="alert"></p><a id="artwork-rpc-independent" hidden>Open this artwork on Find3r ↗</a><div class="dialog-actions"><button type="submit" class="primary">Save &amp; retry</button></div></form></dialog>
+  <noscript>This page needs JavaScript to load artwork details. <a href="./learn.html#scope">How it works</a> explains artwork browsing.</noscript>
+</body>
+</html>

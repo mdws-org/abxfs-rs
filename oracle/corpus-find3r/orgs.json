@@ -1,0 +1,12 @@
+{
+  "generation": "2026-10-v2",
+  "chains": [1, 8453, 42161, 84532],
+  "factory": "0xf3AE3a2C811fC60526793c88a051cf1Bc2CDd3F6",
+  "stores": {
+    "content": "0xd4a0FFa88a58ee7Bb7e802E7079EE90C8DA52250",
+    "file": "0x13036662e483335Ff9C6F30e8852A4694E9A2154",
+    "directory": "0xB9411b8fc6Fa3CCe85eFb6dd3fFa11f83A54eF72",
+    "hook": "0x8556b2f339e5B5e652EA94cBb6EC80399c978e13",
+    "enumeration": "0x0c6B1113cC434F8829439FE51e63Ba10f4dB4f56"
+  }
+}

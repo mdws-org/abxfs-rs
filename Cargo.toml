@@ -1,0 +1,40 @@
+[package]
+name = "abxfs-rs"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Independent implementation of the ABX FS content layer (chunking, FastLZ, ids, node trees, IPFS CIDs) and its read path"
+publish = false
+
+[lib]
+name = "abxfs"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "abxfs-rs"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+# The command line: folder scan, JSON-RPC reads and verification.
+cli = ["dep:ureq"]
+# The browser build: in-memory planning exported through wasm-bindgen.
+wasm = ["dep:wasm-bindgen"]
+
+[dependencies]
+tiny-keccak = { version = "2.0.2", features = ["keccak"] }
+sha2 = "0.10"
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+flate2 = "=1.1.10"
+brotli-decompressor = "=6.2.0"
+ruzstd = "=0.9.1"
+ureq = { version = "2.12", default-features = false, features = ["tls", "gzip", "json"], optional = true }
+wasm-bindgen = { version = "=0.2.129", optional = true }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

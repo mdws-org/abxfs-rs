@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#171411"/>
+  <circle cx="256" cy="256" r="176" fill="none" stroke="#e7ad67" stroke-width="16"/>
+  <text x="256" y="242" fill="#f4ead7" font-family="monospace" font-size="84" text-anchor="middle">ABX</text>
+  <text x="256" y="322" fill="#e7ad67" font-family="monospace" font-size="42" text-anchor="middle">ETHEREUM</text>
+</svg>
