@@ -85,3 +85,34 @@ sha256 04f952c55d63630d2c6db5fd7eb51e19cb4960cab98bfa28b73e96c45f95cc93  site/pk
 ## Reference material
 
 `SPEC.md` cites `@artblocks/abxfs-sdk` 0.2.0 unpacked at `ref/abxfs-sdk-0.2.0/`. That directory is not in this repository; recreate it with `npm pack @artblocks/abxfs-sdk@0.2.0` and unpack the tarball there. `oracle/golden/` holds the reference outputs produced from it, and the tests compare against those files. The edge-case corpus those outputs were made from is generated, not stored: `node oracle/make-corpus.mjs oracle/corpus-edge` (seeded, so the bytes are the same on every run); the golden and chain tests need it present.
+
+## From-chain viewer
+
+`view/` is a web page that opens an ABX FS project or root by reading it from chain in the browser, with no gateway. A service worker answers every request for its origin from chain reads (`site/chain.js`, shared with the page's root lookup) and checks each file back to the root before serving it: chunks against their records and chunk ids, chunk-tree and directory nodes against their ids, files against their file CIDs, directories against their directory CIDs, and a codec's output against `outputHash`.
+
+The hostname names what is shown, so every project and every root is its own web origin (`site/target.js`):
+
+- `<chain id>-<org address, 40 hex>-<token id>` is a project. Its current root is the token's `abxfs.cid` param. No hash covers that read, so every configured endpoint is asked at the same block (the lowest any of them reports). At least two must answer and all that answer must agree.
+- `r<chain id>-<root, 52 base32 characters>` is one root. Nothing is taken from an endpoint unchecked.
+
+A project's scripts run in the viewer's origin and can write its storage, so nothing stored is trusted. The worker stores raw chain replies only, and each one passes the same checks as a fresh reply every time it is used. Checked results are held in the worker's memory. A reply that fails a check is read again from the same endpoint, then from the next one.
+
+The host serves the same static files on every subdomain and `index.html` for any path that is not one of them. That fallback is required: a browser fetches a service worker script from the host, never through the viewer, so a project that tries to register its own worker gets HTML and is refused. `view/_headers` lists the response headers the host must send. `/_abxfs/info.html` on any viewer hostname lists what was read and checked, and can reset the viewer for that address.
+
+Limits: the two canonical SSTORE2 backends only, files up to 64 MiB and 16,384 chunks, and the codecs the browser's `DecompressionStream` has (`gzip` and `deflate` in every current browser). A project's own service worker does not run, and a project folder named `_abxfs` cannot be opened. The host that serves the viewer's code is trusted to serve this code.
+
+Run it locally:
+
+```
+tools/build-view.py
+tools/view-serve.py        # then open http://8453-ab025e1f9f469ae55e5f193ecdddaa1e0f4e2ff6-0.localhost:8853/
+```
+
+Tests. The first two take a folder written by `abxfs-rs read <root> --chain <chain> --out <folder>`:
+
+```
+node tests/chain-read.mjs base <root> <folder>            # same bytes as abxfs-rs; no changed reply is accepted
+node tests/view-check.mjs http://<label>.localhost:8853/ <folder>   # the same, through the service worker in a browser
+node tests/head-rule.mjs                                  # the current-root rule against made-up endpoints
+node tests/hostile-page.mjs http://<label>.localhost:8853/ /index.html   # what a project's own scripts can try: a worker of their own, rewriting storage
+```

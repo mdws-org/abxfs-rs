@@ -5,3 +5,4 @@
 /oracle/corpus-edge/
 /site/node_modules/
 .DS_Store
+/view-dist/
