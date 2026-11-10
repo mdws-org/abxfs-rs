@@ -1,0 +1,39 @@
+# Render Blueprint for the from-chain viewer (view/), served as a static site on every subdomain of its host.
+# The custom domain (a wildcard) is added in the Render dashboard, not here.
+#
+# The rewrite is required, not a convenience: a browser fetches a service worker script from the host, never
+# through the viewer, so any path that is not one of the viewer's files must come back as the start page (HTML).
+# Render skips a rewrite when a file exists at the path, so /_abxfs/* is served as is.
+#
+# The headers repeat view/_headers (Cloudflare's format) and tools/view-serve.py. The worker script's own CSP
+# governs its fetches, so connect-src allows the public RPC endpoints.
+services:
+  - type: web
+    runtime: static
+    name: fromchain-view
+    buildCommand: python3 tools/build-view.py
+    staticPublishPath: view-dist
+    autoDeployTrigger: "off"
+    envVars:
+      - key: SKIP_INSTALL_DEPS
+        value: "true"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+      - path: /_abxfs/sw.js
+        name: Service-Worker-Allowed
+        value: /
