@@ -5,11 +5,11 @@ import { keccak256 } from './keccak-lookup.js';
 
 // Each chain's endpoints, tried in order; a later one is used when an earlier one cannot be reached.
 const CHAINS = {
-  base: { id: 8453, name: 'Base', rpcs: ['https://mainnet.base.org', 'https://base-rpc.publicnode.com'] },
-  'arbitrum-one': { id: 42161, name: 'Arbitrum One', rpcs: ['https://arb1.arbitrum.io/rpc', 'https://arbitrum-one-rpc.publicnode.com'] },
+  base: { id: 8453, name: 'Base', rpcs: ['https://mainnet.base.org', 'https://base-rpc.publicnode.com', 'https://base.drpc.org'] },
+  'arbitrum-one': { id: 42161, name: 'Arbitrum One', rpcs: ['https://arb1.arbitrum.io/rpc', 'https://arbitrum-one-rpc.publicnode.com', 'https://arbitrum.drpc.org'] },
   ethereum: { id: 1, name: 'Ethereum', rpcs: ['https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org'] },
-  'base-sepolia': { id: 84532, name: 'Base Sepolia', rpcs: ['https://sepolia.base.org', 'https://base-sepolia-rpc.publicnode.com'] },
-  'arbitrum-sepolia': { id: 421614, name: 'Arbitrum Sepolia', rpcs: ['https://sepolia-rollup.arbitrum.io/rpc', 'https://arbitrum-sepolia-rpc.publicnode.com'] },
+  'base-sepolia': { id: 84532, name: 'Base Sepolia', rpcs: ['https://sepolia.base.org', 'https://base-sepolia-rpc.publicnode.com', 'https://base-sepolia.drpc.org'] },
+  'arbitrum-sepolia': { id: 421614, name: 'Arbitrum Sepolia', rpcs: ['https://sepolia-rollup.arbitrum.io/rpc', 'https://arbitrum-sepolia-rpc.publicnode.com', 'https://arbitrum-sepolia.drpc.org'] },
   sepolia: { id: 11155111, name: 'Sepolia', rpcs: ['https://ethereum-sepolia-rpc.publicnode.com', 'https://0xrpc.io/sep'] },
 };
 const FILE_STORE = '8b6077a1d6953d96687005b9408d56a655b4d155';
@@ -32,6 +32,7 @@ const MAX_ITEMS = 50_000;
 const MAX_ETH_CALLS = 3_000;
 const MAX_REPLY_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
+const MAX_FILE_CHUNKS = 16_384;
 
 const enc = new TextEncoder();
 const toHex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
@@ -105,18 +106,38 @@ async function cappedText(r) {
   return new TextDecoder().decode(concat(...parts));
 }
 
+// A context may carry `store`, a place for replies that a finished, checked read depended on:
+// `store.get(key)` returns a stored reply or null. A stored reply is used like a fresh one and passes through
+// the same checks, so nothing read from the store is trusted. Fresh replies are collected in `ctx.fresh` for the
+// caller to keep once the whole read has checked out; `ctx.skipStored` reads past the store.
 async function rpc(ctx, method, params) {
+  const key = ctx.store ? `${ctx.chain.id} ${method} ${JSON.stringify(params)}` : null;
+  if (key && !ctx.skipStored) {
+    const hit = await ctx.store.get(key);
+    if (typeof hit === 'string') { ctx.storedHits = (ctx.storedHits || 0) + 1; return hit; }
+  }
+  const result = await ask(ctx, method, params);
+  if (key && typeof result === 'string') (ctx.fresh ||= []).push([key, result]);
+  return result;
+}
+
+async function ask(ctx, method, params) {
   ctx.requests++;
   const at = host(ctx.url);
   return limited(async () => {
     let r;
-    try {
-      r = await fetch(ctx.url, {
-        method: 'POST', credentials: 'omit', redirect: 'error', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(30000),
-      });
-    } catch (e) {
-      throw new LookupError('rpc', `could not reach ${at} (${e.name === 'TimeoutError' ? 'timed out' : e.message})`);
+    // A public endpoint that answers 429 is asked again, twice, after a growing pause.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        r = await fetch(ctx.url, {
+          method: 'POST', credentials: 'omit', redirect: 'error', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(30000),
+        });
+      } catch (e) {
+        throw new LookupError('rpc', `could not reach ${at} (${e.name === 'TimeoutError' ? 'timed out' : e.message})`);
+      }
+      if (r.status !== 429 || attempt === 2) break;
+      await new Promise((go) => setTimeout(go, 700 * 2 ** attempt));
     }
     if (!r.ok) throw new LookupError('rpc', `${at} answered HTTP ${r.status}`);
     const text = await cappedText(r).catch(() => undefined);
@@ -243,8 +264,9 @@ function ok(out, what) {
 
 const be = (b, at, n) => { let v = 0; for (let i = 0; i < n; i++) v = v * 256 + b[at + i]; return v; };
 const h256At = (b, at) => '0x' + toHex(b.subarray(at, at + 32));
-const nameText = new TextDecoder('utf-8', { fatal: false });
-const strictText = new TextDecoder('utf-8', { fatal: true });
+// ignoreBOM keeps a leading U+FEFF in the text, so two different names never decode to the same one.
+const nameText = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
+const strictText = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 // The protocol's name rules: non-empty, no "/" or "\\", not "." or "..", valid UTF-8. Anything else is shown
 // escaped and never joined into a path.
 function entryName(b) {
@@ -310,6 +332,8 @@ function decodeFileInfo(cid, data) {
   const got = hash(Uint8Array.of(0x31), fromHex(info.root), keccak256(mimeBytes), fromHex(info.codec), fromHex(info.outputHash));
   if (got !== cid) throw new LookupError('check', `file ${cid}: getFileInfo describes file CID ${got}`);
   if (info.root === ZERO && (info.chunkCount || info.size)) throw new LookupError('check', `file ${cid}: empty root but nonzero size`);
+  // The rules createFile enforces: a codec and an output hash come together, and the empty file has neither.
+  if ((info.codec === ZERO) !== (info.outputHash === ZERO) || (info.root === ZERO && info.codec !== ZERO)) throw new LookupError('check', `file ${cid}: its codec and output hash do not go together`);
   return info;
 }
 
@@ -487,7 +511,7 @@ function decodeRecord(id, data) {
   return r;
 }
 
-const u48 = (n) => { const b = new Uint8Array(6); for (let i = 5, v = n; i >= 0; i--) { b[i] = v % 256; v = Math.floor(v / 256); } return b; };
+const u48 = (n) => { if (!(n >= 0 && n < 2 ** 48)) throw new LookupError('check', 'a size does not fit in 48 bits'); const b = new Uint8Array(6); for (let i = 5, v = n; i >= 0; i--) { b[i] = v % 256; v = Math.floor(v / 256); } return b; };
 
 // The data of one chunk, from its pointer contract's code, checked against its record and its id.
 async function readChunk(ctx, id, r) {
@@ -535,7 +559,10 @@ async function decodeContent(name, stored) {
 async function readFile(ctx, cid, info) {
   if (info.root === ZERO) return new Uint8Array(0);
   if (info.size > MAX_FILE_BYTES) throw new LookupError('toolarge', `the file stores more than ${MAX_FILE_BYTES / 1048576} MiB`);
-  const nodes = new Map(), wantLevel = new Map([[info.root, info.rootLevel]]);
+  if (info.chunkCount > MAX_FILE_CHUNKS) throw new LookupError('toolarge', `the file has more than ${MAX_FILE_CHUNKS.toLocaleString('en-US')} chunks`);
+  // What each node must be, set by its parent before it is read (the file info, for the root). A node's own
+  // totals are bound to its blob, so the size and chunk limits above hold before any subtree is expanded.
+  const nodes = new Map(), want = new Map([[info.root, { level: info.rootLevel, count: info.chunkCount, size: info.size }]]);
   for (let q = [info.root]; q.length;) {
     const outs = await runViews(ctx, q.map((id) => view('fileNode', id)));
     const next = [];
@@ -543,12 +570,18 @@ async function readFile(ctx, cid, info) {
       const { blob, level, count: n, size } = decodeNode(ok(outs[i], `getNode ${id}`));
       const got = hash(Uint8Array.of(0x41), blob);
       if (got !== id) throw new LookupError('check', `file node ${id}: getNode returned a blob whose id is ${got}`);
-      if (blob[0] !== level || level > NODE_MAX_LEVEL || wantLevel.get(id) !== level) throw new LookupError('check', `file node ${id}: level ${level} disagrees with the blob or its parent`);
+      const w = want.get(id);
+      if (blob[0] !== level || level > NODE_MAX_LEVEL || w.level !== level) throw new LookupError('check', `file node ${id}: level ${level} disagrees with the blob or its parent`);
       const node = parseFileNode(id, blob, n, size);
+      if (n !== w.count || size !== w.size) throw new LookupError('check', `file node ${id}: holds ${n} chunks / ${size} bytes, its parent says ${w.count} / ${w.size}`);
       nodes.set(id, node);
+      let prevC = 0, prevB = 0;
       for (const c of node.children || []) {
-        if (wantLevel.has(c.id) && wantLevel.get(c.id) !== level - 1) throw new LookupError('check', `file node ${c.id} is linked at two levels`);
-        if (!wantLevel.has(c.id)) { wantLevel.set(c.id, level - 1); next.push(c.id); }
+        const child = { level: level - 1, count: c.cum - prevC, size: c.cumBytes - prevB };
+        prevC = c.cum; prevB = c.cumBytes;
+        const seen = want.get(c.id);
+        if (seen && (seen.level !== child.level || seen.count !== child.count || seen.size !== child.size)) throw new LookupError('check', `file node ${c.id} is linked with two different totals`);
+        if (!seen) { want.set(c.id, child); next.push(c.id); }
       }
     });
     q = next;

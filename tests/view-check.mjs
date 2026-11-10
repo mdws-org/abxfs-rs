@@ -51,13 +51,24 @@ for (const f of files) {
 const extra = await page.evaluate(async () => {
   const missing = await fetch('/no-such-file-here.txt');
   const range = await fetch('/', { headers: { range: 'bytes=0-9' } });
-  const again = await fetch('/');
+  const whole = await fetch('/');
+  const headReq = await fetch('/', { method: 'HEAD', headers: { range: 'bytes=0-9' } });
+  // What a hostile project page could try: its own service worker, and a redirect off this origin.
+  let worker;
+  try { await navigator.serviceWorker.register('/index.html', { scope: '/' }); worker = 'REGISTERED'; } catch { worker = 'refused'; }
+  const slashes = await fetch('//' + location.host.replace(/^[^.]+\./, 'elsewhere.') + '/', { redirect: 'manual' }).then((r) => r.type, () => 'failed');
   return {
     missing: missing.status,
-    range: [range.status, (await range.arrayBuffer()).byteLength, range.headers.get('content-range')],
-    from: again.headers.get('x-abxfs-from'),
+    range: [range.status, (await range.arrayBuffer()).byteLength, range.headers.get('content-range'), range.headers.get('content-length')],
+    length: [whole.headers.get('content-length'), (await whole.arrayBuffer()).byteLength],
+    head: [headReq.status, headReq.headers.get('content-length')],
+    worker,
+    slashes,
   };
 });
+if (extra.worker !== 'refused') failures.push('a project page could register its own service worker');
+if (Number(extra.length[0]) !== extra.length[1]) failures.push(`content-length ${extra.length[0]} for ${extra.length[1]} bytes`);
+if (extra.head[0] !== 200) failures.push(`HEAD with a Range answered ${extra.head[0]}`);
 if (extra.missing !== 404) failures.push(`a missing path answered ${extra.missing}`);
 if (extra.range[0] !== 206 || extra.range[1] !== 10) failures.push(`a 10-byte range answered ${extra.range}`);
 

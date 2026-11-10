@@ -92,12 +92,14 @@ sha256 04f952c55d63630d2c6db5fd7eb51e19cb4960cab98bfa28b73e96c45f95cc93  site/pk
 
 The hostname names what is shown, so every project and every root is its own web origin (`site/target.js`):
 
-- `<chain id>-<org address, 40 hex>-<token id>` is a project. Its current root is the token's `abxfs.cid` param. No hash covers that read, so every configured endpoint is asked and all that answer must agree.
+- `<chain id>-<org address, 40 hex>-<token id>` is a project. Its current root is the token's `abxfs.cid` param. No hash covers that read, so every configured endpoint is asked at the same block (the lowest any of them reports). At least two must answer and all that answer must agree.
 - `r<chain id>-<root, 52 base32 characters>` is one root. Nothing is taken from an endpoint unchecked.
 
-The host serves the same static files on every subdomain and `index.html` for any path that is not a file. `view/_headers` lists the response headers it must send. `/_abxfs/info.html` on any viewer hostname lists what was read and checked.
+A project's scripts run in the viewer's origin and can write its storage, so nothing stored is trusted. The worker stores raw chain replies only, and each one passes the same checks as a fresh reply every time it is used. Checked results are held in the worker's memory. A reply that fails a check is read again from the same endpoint, then from the next one.
 
-Limits: the two canonical SSTORE2 backends only, files up to 64 MiB, the `gzip` and `deflate` codecs everywhere and `br` and `zstd` where the browser's `DecompressionStream` has them. A project's own service worker does not run.
+The host serves the same static files on every subdomain and `index.html` for any path that is not one of them. That fallback is required: a browser fetches a service worker script from the host, never through the viewer, so a project that tries to register its own worker gets HTML and is refused. `view/_headers` lists the response headers the host must send. `/_abxfs/info.html` on any viewer hostname lists what was read and checked, and can reset the viewer for that address.
+
+Limits: the two canonical SSTORE2 backends only, files up to 64 MiB and 16,384 chunks, and the codecs the browser's `DecompressionStream` has (`gzip` and `deflate` in every current browser). A project's own service worker does not run, and a project folder named `_abxfs` cannot be opened. The host that serves the viewer's code is trusted to serve this code.
 
 Run it locally:
 
@@ -106,9 +108,11 @@ tools/build-view.py
 tools/view-serve.py        # then open http://8453-ab025e1f9f469ae55e5f193ecdddaa1e0f4e2ff6-0.localhost:8853/
 ```
 
-Tests, each against a folder written by `abxfs-rs read <root> --chain <chain> --out <folder>`:
+Tests. The first two take a folder written by `abxfs-rs read <root> --chain <chain> --out <folder>`:
 
 ```
 node tests/chain-read.mjs base <root> <folder>            # same bytes as abxfs-rs; no changed reply is accepted
 node tests/view-check.mjs http://<label>.localhost:8853/ <folder>   # the same, through the service worker in a browser
+node tests/head-rule.mjs                                  # the current-root rule against made-up endpoints
+node tests/hostile-page.mjs http://<label>.localhost:8853/ /index.html   # what a project's own scripts can try: a worker of their own, rewriting storage
 ```

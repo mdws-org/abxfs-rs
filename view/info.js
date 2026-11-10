@@ -20,7 +20,7 @@ function show(info) {
   fact(dl, 'Chain', `${info.chain.name} (${info.chain.id})`);
   if (info.target.kind === 'project') {
     fact(dl, 'Project', `${info.target.token} of ${info.target.org}`, true);
-    if (info.head) fact(dl, 'Current root', `agreed by ${info.head.sources.join(' and ')}${info.head.stale ? ', read earlier; the endpoints cannot be reached now' : ''}`);
+    if (info.head) fact(dl, 'Current root', `agreed by ${info.head.sources.join(', ')} at block ${info.head.block.toLocaleString('en-US')}${info.head.stale ? '; read earlier, the endpoints cannot be reached now' : ''}`);
   }
   if (info.root) fact(dl, 'Root', info.root, true);
   fact(dl, 'Endpoints', info.chain.endpoints.join(', '));
@@ -29,11 +29,12 @@ function show(info) {
     $('#status').textContent = `The reader could not read this: ${info.error}`;
     return;
   }
-  const read = info.files.filter((f) => f.read).length;
-  $('#status').textContent = `${info.files.length} ${info.files.length === 1 ? 'file' : 'files'} under this root; ${read} read and checked so far. A file is read when a page first asks for it.`;
+  const done = info.files.filter((f) => f.checked).length;
+  $('#status').textContent = `${info.files.length} ${info.files.length === 1 ? 'file' : 'files'} under this root; ${done} checked and in memory now. A file is read and checked when a page asks for it.` +
+    (info.unnamed ? ` ${info.unnamed} ${info.unnamed === 1 ? 'entry has a name' : 'entries have names'} that cannot be a path, and cannot be opened here.` : '');
   const rows = info.files.map((f) => {
     const tr = document.createElement('tr');
-    const cells = [[f.path || '(the root is one file)'], [bytes(f.size), 'n'], [f.codec ? `${f.mime}, ${f.codec}` : f.mime], [short(f.cid), 'mono', f.cid], [f.read ? 'checked' : 'not yet']];
+    const cells = [[f.path || '(the root is one file)'], [bytes(f.size), 'n'], [f.codec ? `${f.mime}, ${f.codec}` : f.mime], [short(f.cid), 'mono', f.cid], [f.checked ? 'checked' : 'not yet']];
     for (const [text, cls, title] of cells) {
       const td = document.createElement('td');
       td.textContent = text;
@@ -55,8 +56,25 @@ async function ask() {
     return;
   }
   const channel = new MessageChannel();
-  channel.port1.onmessage = (e) => show(e.data);
+  const late = setTimeout(() => { $('#status').textContent = 'The reader did not answer. Reset the viewer for this address below, then open the project again.'; }, 60_000);
+  channel.port1.onmessage = (e) => { clearTimeout(late); show(e.data); };
   worker.postMessage({ type: 'abxfs-info' }, [channel.port2]);
 }
+
+// Remove the reader and everything it stored for this address. The next visit starts from nothing.
+async function reset() {
+  const out = $('#reset-status');
+  try {
+    for (const reg of await navigator.serviceWorker.getRegistrations()) await reg.unregister();
+    for (const name of await caches.keys()) if (name.startsWith('abxfs-view-')) await caches.delete(name);
+    sessionStorage.clear();
+    out.textContent = 'Reset. Opening the project again…';
+    location.href = '/';
+  } catch (e) {
+    out.textContent = `Could not reset: ${e.message}`;
+  }
+}
+
+$('#reset').addEventListener('click', reset);
 
 ask();

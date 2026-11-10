@@ -20,25 +20,37 @@
                 Every file is rebuilt from its chunks and checked back to the root: each chunk against its record
                 and its chunk id, each chunk-tree node and directory node against its id, each file against its file
                 CID, each directory against its directory CID. A compressed file is decoded here and its content must
-                hash to the value in its file CID. A reply that fails a check is refused, so an endpoint cannot
-                change a file under a known root.
+                hash to the value in its file CID. A reply that fails a check is refused and the next endpoint is
+                asked, so an endpoint cannot change a file under a known root.
             </p>
             <h2>Taken from the endpoints</h2>
             <p id="trust">
                 A project's current root is read from the project's token. No hash covers that answer, so every
-                endpoint listed above is asked and all that answer must agree. A root address (one that starts
-                with "r") names its root in the hostname and needs no such answer.
+                endpoint listed above is asked at the same block: at least two must answer and all that answer must
+                agree. A root address (one that starts with "r") names its root in the hostname and needs no such
+                answer.
             </p>
             <p class="soft">
                 The viewer's own code is served by this hostname's web server; everything it shows comes from the
-                chain. A project's own service worker does not run here, and its links to wallets and other sites
-                work as they would anywhere.
+                chain. A project's own service worker does not run here, and a project folder named _abxfs cannot
+                be opened.
+            </p>
+
+            <h2>Kept in this browser</h2>
+            <p>
+                Only raw replies from the chain are kept, so a later visit asks for less. They are not trusted: a
+                project's own scripts can write this address's storage, so every kept reply goes through the same
+                checks as a fresh one each time it is used.
+            </p>
+            <p>
+                <button type="button" id="reset">Reset the viewer for this address</button>
+                <span id="reset-status" class="soft" role="status"></span>
             </p>
 
             <h2>Files</h2>
             <div class="scroll">
                 <table id="files" hidden>
-                    <thead><tr><th>Path</th><th>Stored</th><th>Type</th><th>File CID</th><th>Read</th></tr></thead>
+                    <thead><tr><th>Path</th><th>Stored</th><th>Type</th><th>File CID</th><th>Checked</th></tr></thead>
                     <tbody></tbody>
                 </table>
             </div>

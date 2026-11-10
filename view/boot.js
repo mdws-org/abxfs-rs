@@ -8,12 +8,18 @@ const say = (text) => { status.textContent = text; };
 const target = parseHost(location.hostname);
 const chain = target && Object.values(CHAINS).find((c) => c.id === target.chainId);
 const RELOADS = 'abxfs-view-reloads';
+const START_MS = 20_000;
 
-// A reload that still lands on this page means the worker is not answering; stop after two.
+// A reload that still lands on this page means the worker is not answering. Two reloads within half a minute
+// is the limit; older ones (an earlier forced reload of a working page) do not count.
+let reloading = false;
 function reloadOnce() {
-  const n = Number(sessionStorage.getItem(RELOADS) || 0);
-  if (n >= 2) return say('The reader started but is not answering for this page. Close every tab of this address and open it again.');
-  sessionStorage.setItem(RELOADS, String(n + 1));
+  if (reloading) return;
+  let recent = [];
+  try { recent = JSON.parse(sessionStorage.getItem(RELOADS) || '[]').filter((t) => Date.now() - t < 30_000); } catch { /* start over */ }
+  if (recent.length >= 2) return say('The reader started but is not answering for this page. Open "What it read and checked" below and reset the viewer for this address.');
+  reloading = true;
+  sessionStorage.setItem(RELOADS, JSON.stringify([...recent, Date.now()]));
   location.reload();
 }
 
@@ -25,7 +31,11 @@ async function start() {
   say(`Starting the reader for ${chain.name}…`);
   try {
     await navigator.serviceWorker.register('/_abxfs/sw.js', { type: 'module', scope: '/', updateViaCache: 'none' });
-    await navigator.serviceWorker.ready;
+    // `ready` never settles when the worker fails to install, so it gets a deadline.
+    await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((_, no) => setTimeout(() => no(new Error(`it did not become ready within ${START_MS / 1000} seconds; this browser may not run module service workers`)), START_MS)),
+    ]);
   } catch (e) {
     return say(`The reader did not start: ${e.message}`);
   }

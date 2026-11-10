@@ -33,6 +33,7 @@ function base32ToRoot(s) {
 
 function parseHost(hostname) {
   const label = hostname.split('.')[0];
+  if (label.length > 63) return null; // longer than a DNS label, so it can never be reached
   let m = /^([1-9]\d{0,9})-([0-9a-f]{40})-(0|[1-9]\d{0,19})$/.exec(label);
   if (m) return { kind: 'project', chainId: Number(m[1]), org: '0x' + m[2], token: m[3], label };
   m = /^r([1-9]\d{0,9})-([a-z2-7]{52})$/.exec(label);
