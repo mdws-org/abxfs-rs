@@ -8,7 +8,7 @@
 // reply each time it is used. Checked results live in this worker's memory only.
 
 import { CHAINS, LookupError, ZERO, fromHex, hash, host, quantity, readFile, rpc, walk, word } from './chain.js';
-import { parseHost } from './target.js';
+import { gatewayUrl, parseHost } from './target.js';
 
 const TOKEN_PARAM = '0x6bd39222'; // tokenParam(uint256,bytes32)
 const KEY_CID = '61627866732e636964'.padEnd(64, '0'); // "abxfs.cid"
@@ -245,6 +245,7 @@ function problem(request, status, title, detail) {
     `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<title>${esc(title)}</title><link rel="stylesheet" href="${OWN}view.css">` +
     `<main><h1>${esc(title)}</h1><p>${esc(detail)}</p>` +
+    (gatewayUrl(target) ? `<p><a href="${esc(gatewayUrl(target))}">Open this project on ABX FS's own gateway</a></p>` : '') +
     `<p><a href="${OWN}info.html">What this viewer read and checked, and how to reset it</a></p></main>`,
     { status, headers: { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'content-security-policy': PAGE_CSP } },
   );

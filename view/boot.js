@@ -1,10 +1,18 @@
 // The start page of a viewer hostname: shown until the service worker controls this origin, then replaced by
 // the project itself on reload.
 import { CHAINS } from './chain.js';
-import { parseHost } from './target.js';
+import { gatewayUrl, parseHost } from './target.js';
 
 const status = document.getElementById('status');
 const say = (text) => { status.textContent = text; };
+// When the reader cannot run here, a project can still be opened on the official gateway.
+function stuck(text) {
+  say(text);
+  const url = gatewayUrl(target);
+  if (!url) return;
+  document.getElementById('gateway-link').href = url;
+  document.getElementById('gateway').hidden = false;
+}
 const target = parseHost(location.hostname);
 const chain = target && Object.values(CHAINS).find((c) => c.id === target.chainId);
 const RELOADS = 'abxfs-view-reloads';
@@ -17,7 +25,7 @@ function reloadOnce() {
   if (reloading) return;
   let recent = [];
   try { recent = JSON.parse(sessionStorage.getItem(RELOADS) || '[]').filter((t) => Date.now() - t < 30_000); } catch { /* start over */ }
-  if (recent.length >= 2) return say('The reader started but is not answering for this page. Open "What it read and checked" below and reset the viewer for this address.');
+  if (recent.length >= 2) return stuck('The reader started but is not answering for this page. Open "What it read and checked" below and reset the viewer for this address.');
   reloading = true;
   sessionStorage.setItem(RELOADS, JSON.stringify([...recent, Date.now()]));
   location.reload();
@@ -27,7 +35,7 @@ async function start() {
   if (!target) return say('This address does not name a project or a root. The first part of the hostname is "<chain id>-<org address>-<project number>" for a project, or "r<chain id>-<root in base32>" for a root.');
   if (!chain) return say(`This viewer does not read chain ${target.chainId}.`);
   document.getElementById('title').textContent = target.kind === 'project' ? `Project ${target.token} of ${target.org}` : `Root ${target.root}`;
-  if (!('serviceWorker' in navigator)) return say('This browser has no service workers (or blocks them here, as private windows in some browsers do), so it cannot run the reader.');
+  if (!('serviceWorker' in navigator)) return stuck('This browser has no service workers (or blocks them here, as private windows in some browsers do), so it cannot run the reader.');
   say(`Starting the reader for ${chain.name}…`);
   try {
     await navigator.serviceWorker.register('/_abxfs/sw.js', { type: 'module', scope: '/', updateViaCache: 'none' });
@@ -37,7 +45,7 @@ async function start() {
       new Promise((_, no) => setTimeout(() => no(new Error(`it did not become ready within ${START_MS / 1000} seconds; this browser may not run module service workers`)), START_MS)),
     ]);
   } catch (e) {
-    return say(`The reader did not start: ${e.message}`);
+    return stuck(`The reader did not start: ${e.message}`);
   }
   say(`Reading from ${chain.name} and checking each file…`);
   if (navigator.serviceWorker.controller) return reloadOnce();

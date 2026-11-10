@@ -5,9 +5,9 @@
 //   r<chain id>-<root, 52 base32 characters>      one root, which never changes
 // Only the first DNS label is read.
 
-// Where the viewer is hosted: every subdomain of this name serves it. Empty until it is deployed, which hides
-// the "Open from chain" links. On localhost the links point at the local viewer (tools/view-serve.py).
-const VIEW_BASE = '';
+// Where the viewer is hosted: every subdomain of this name serves it. An empty value hides the "Open from
+// chain" links. On localhost the links point at the local viewer (tools/view-serve.py).
+const VIEW_BASE = 'fromchain.dynv6.net';
 const LOCAL_VIEW = 'localhost:8853';
 
 const B32 = 'abcdefghijklmnopqrstuvwxyz234567';
@@ -52,4 +52,7 @@ function viewUrl(t, here = globalThis.location) {
   return VIEW_BASE ? `https://${hostLabel(t)}.${VIEW_BASE}/` : null;
 }
 
-export { base32ToRoot, hostLabel, parseHost, rootToBase32, viewUrl };
+// The same project on ABX FS's own gateway, which names hosts the same way. A bare root has no address there.
+const gatewayUrl = (t) => (t && t.kind === 'project' ? `https://${hostLabel(t)}.abxfs.app/` : null);
+
+export { base32ToRoot, gatewayUrl, hostLabel, parseHost, rootToBase32, viewUrl };
