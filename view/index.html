@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="color-scheme" content="dark light" />
+        <meta name="robots" content="noindex" />
+        <title>ABX FS, read from chain</title>
+        <link rel="stylesheet" href="/_abxfs/view.css" />
+        <script type="module" src="/_abxfs/boot.js"></script>
+    </head>
+    <body>
+        <main>
+            <h1 id="title">ABX FS, read from chain</h1>
+            <p id="status">Starting the reader…</p>
+            <p id="about" class="soft">
+                This page opens an <a href="https://fs.abx.io/">ABX FS</a> project by reading it from the chain in
+                this browser. No gateway serves the files: a service worker asks public RPC endpoints for them and
+                checks every file against the project's root before showing it.
+                <a href="/_abxfs/info.html">What it read and checked</a>
+            </p>
+        </main>
+    </body>
+</html>

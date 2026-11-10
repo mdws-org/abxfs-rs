@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="color-scheme" content="dark light" />
+        <meta name="robots" content="noindex" />
+        <title>What this viewer read and checked</title>
+        <link rel="stylesheet" href="/_abxfs/view.css" />
+        <script type="module" src="/_abxfs/info.js"></script>
+    </head>
+    <body>
+        <main>
+            <h1>What this viewer read and checked</h1>
+            <p id="status">Asking the reader…</p>
+            <dl id="facts" hidden></dl>
+
+            <h2>Checked in this browser</h2>
+            <p>
+                Every file is rebuilt from its chunks and checked back to the root: each chunk against its record
+                and its chunk id, each chunk-tree node and directory node against its id, each file against its file
+                CID, each directory against its directory CID. A compressed file is decoded here and its content must
+                hash to the value in its file CID. A reply that fails a check is refused, so an endpoint cannot
+                change a file under a known root.
+            </p>
+            <h2>Taken from the endpoints</h2>
+            <p id="trust">
+                A project's current root is read from the project's token. No hash covers that answer, so every
+                endpoint listed above is asked and all that answer must agree. A root address (one that starts
+                with "r") names its root in the hostname and needs no such answer.
+            </p>
+            <p class="soft">
+                The viewer's own code is served by this hostname's web server; everything it shows comes from the
+                chain. A project's own service worker does not run here, and its links to wallets and other sites
+                work as they would anywhere.
+            </p>
+
+            <h2>Files</h2>
+            <div class="scroll">
+                <table id="files" hidden>
+                    <thead><tr><th>Path</th><th>Stored</th><th>Type</th><th>File CID</th><th>Read</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <p><a href="/">Back to the project</a></p>
+        </main>
+    </body>
+</html>

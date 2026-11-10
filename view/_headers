@@ -1,0 +1,12 @@
+# Response headers for the viewer's own files (Cloudflare static assets format). Everything else a visitor
+# sees is answered by the service worker from chain reads.
+# The worker script's own CSP governs its fetches, so connect-src allows the public RPC endpoints.
+
+/*
+  Cache-Control: no-cache
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+
+/_abxfs/sw.js
+  Service-Worker-Allowed: /

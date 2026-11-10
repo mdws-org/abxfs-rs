@@ -1,0 +1,62 @@
+// The info page: asks the service worker what it is showing and lists it.
+const $ = (s) => document.querySelector(s);
+const short = (h) => h.slice(0, 10) + '…' + h.slice(-6);
+const bytes = (n) => (n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KiB' : (n / 1048576).toFixed(2) + ' MiB');
+
+function fact(dl, name, value, mono) {
+  const dt = document.createElement('dt'), dd = document.createElement('dd');
+  dt.textContent = name;
+  dd.textContent = value;
+  if (mono) dd.className = 'mono';
+  dl.append(dt, dd);
+}
+
+function show(info) {
+  const dl = $('#facts');
+  if (!info.target || !info.chain) {
+    $('#status').textContent = 'This address does not name a project or a root this viewer reads.';
+    return;
+  }
+  fact(dl, 'Chain', `${info.chain.name} (${info.chain.id})`);
+  if (info.target.kind === 'project') {
+    fact(dl, 'Project', `${info.target.token} of ${info.target.org}`, true);
+    if (info.head) fact(dl, 'Current root', `agreed by ${info.head.sources.join(' and ')}${info.head.stale ? ', read earlier; the endpoints cannot be reached now' : ''}`);
+  }
+  if (info.root) fact(dl, 'Root', info.root, true);
+  fact(dl, 'Endpoints', info.chain.endpoints.join(', '));
+  dl.hidden = false;
+  if (info.error) {
+    $('#status').textContent = `The reader could not read this: ${info.error}`;
+    return;
+  }
+  const read = info.files.filter((f) => f.read).length;
+  $('#status').textContent = `${info.files.length} ${info.files.length === 1 ? 'file' : 'files'} under this root; ${read} read and checked so far. A file is read when a page first asks for it.`;
+  const rows = info.files.map((f) => {
+    const tr = document.createElement('tr');
+    const cells = [[f.path || '(the root is one file)'], [bytes(f.size), 'n'], [f.codec ? `${f.mime}, ${f.codec}` : f.mime], [short(f.cid), 'mono', f.cid], [f.read ? 'checked' : 'not yet']];
+    for (const [text, cls, title] of cells) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      if (cls) td.className = cls;
+      if (title) td.title = title;
+      tr.append(td);
+    }
+    return tr;
+  });
+  $('#files tbody').replaceChildren(...rows);
+  $('#files').hidden = false;
+}
+
+async function ask() {
+  const reg = 'serviceWorker' in navigator && await navigator.serviceWorker.getRegistration('/');
+  const worker = reg && (reg.active || reg.waiting || reg.installing);
+  if (!worker) {
+    $('#status').textContent = 'The reader is not running for this address yet. Open the project first.';
+    return;
+  }
+  const channel = new MessageChannel();
+  channel.port1.onmessage = (e) => show(e.data);
+  worker.postMessage({ type: 'abxfs-info' }, [channel.port2]);
+}
+
+ask();
