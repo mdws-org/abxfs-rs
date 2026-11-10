@@ -11,6 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent / "view-dist"
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https:; "
        "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+# What the host serves as files: everything the build wrote except its own header rules.
+FILES = {f.relative_to(ROOT).as_posix() for f in ROOT.rglob("*") if f.is_file()} - {"_headers"}
 
 
 class Viewer(http.server.SimpleHTTPRequestHandler):
@@ -18,9 +20,8 @@ class Viewer(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def send_head(self):
-        rel = self.path.split("?", 1)[0].lstrip("/")
-        target = (ROOT / rel).resolve()
-        if not (target.is_file() and ROOT in target.parents) or rel == "_headers":
+        # The request path is only ever compared with the list of built files, never used to build a path.
+        if self.path.split("?", 1)[0].lstrip("/") not in FILES:
             self.path = "/index.html"
         return super().send_head()
 
