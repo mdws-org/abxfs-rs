@@ -99,6 +99,11 @@ A project's scripts run in the viewer's origin and can write its storage, so not
 
 The host serves the same static files on every subdomain and `index.html` for any path that is not one of them. That fallback is required: a browser fetches a service worker script from the host, never through the viewer, so a project that tries to register its own worker gets HTML and is refused. `view/_headers` lists the response headers the host must send. `/_abxfs/info.html` on any viewer hostname lists what was read and checked, and can reset the viewer for that address.
 
+What is left to trust, and how to reduce it:
+
+- The host serves the viewer's own code. `tools/build-view.py` prints one SHA-256 for the build and writes each file's hash to `_abxfs/files.js`; the info page shows both, so any host can be compared with this repository. Once a project has been opened, the worker and its pages keep working if the host stops answering (`tests/host-gone.mjs`).
+- The endpoints are public servers run by other people. A reader can name their own on the info page, such as their own node, and can choose to ask only that one (`tests/endpoint-setting.mjs`).
+
 Limits: the two canonical SSTORE2 backends only, files up to 64 MiB and 16,384 chunks, and the codecs the browser's `DecompressionStream` has (`gzip` and `deflate` in every current browser). A project's own service worker does not run, and a project folder named `_abxfs` cannot be opened. The host that serves the viewer's code is trusted to serve this code.
 
 Run it locally:
@@ -114,5 +119,7 @@ Tests. The first two take a folder written by `abxfs-rs read <root> --chain <cha
 node tests/chain-read.mjs base <root> <folder>            # same bytes as abxfs-rs; no changed reply is accepted
 node tests/view-check.mjs http://<label>.localhost:8853/ <folder>   # the same, through the service worker in a browser
 node tests/head-rule.mjs                                  # the current-root rule against made-up endpoints
+node tests/host-gone.mjs http://<label>.localhost:8853/ <pid of view-serve.py>   # a project still opens after the host is stopped
+node tests/endpoint-setting.mjs http://<label>.localhost:8853/   # the reader's own endpoint: refused, first, only, cleared
 node tests/hostile-page.mjs http://<label>.localhost:8853/ /index.html   # what a project's own scripts can try: a worker of their own, rewriting storage
 ```

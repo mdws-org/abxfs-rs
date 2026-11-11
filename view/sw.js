@@ -9,6 +9,7 @@
 
 import { CHAINS, LookupError, ZERO, fromHex, hash, host, quantity, readFile, rpc, walk, word } from './chain.js';
 import { gatewayUrl, parseHost } from './target.js';
+import { BUILD, FILES } from './files.js';
 
 const TOKEN_PARAM = '0x6bd39222'; // tokenParam(uint256,bytes32)
 const KEY_CID = '61627866732e636964'.padEnd(64, '0'); // "abxfs.cid"
@@ -17,6 +18,7 @@ const HEAD_TTL_MS = 60_000;
 const MAX_LAG_BLOCKS = { 1: 10, 8453: 60, 84532: 60, 42161: 480, 421614: 480, 11155111: 10 };
 const STORE = 'abxfs-view-v2';
 const OWN = '/_abxfs/';
+const OWN_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const READS_AT_ONCE = 3;
 const MEMORY_BYTES = 96 * 1024 * 1024;
 
@@ -28,9 +30,30 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil((async () => {
   for (const name of await caches.keys()) if (name.startsWith('abxfs-view-') && name !== STORE) await caches.delete(name);
   await self.clients.claim();
+  keepOwnFiles(); // not awaited: taking control must not wait on it
 })()));
 
 const ctxFor = (url) => ({ chain, url, requests: 0, ethCalls: 0, block: 'latest' });
+
+/* ── which endpoints ─────────────────────────────────────────────────────── */
+
+// A reader can name an endpoint of their own on the info page, such as their own node. It is asked first, or,
+// if they choose, it is the only one asked: then nothing is taken from anyone else's server, and the rule
+// that two endpoints must agree on a project's current root gives way to the reader's trust in that one.
+// The setting is kept in this origin's storage, which the project's own scripts can also write. That gives a
+// project nothing over its own files (every byte is still checked) and nothing over its own current root
+// (its owner sets that on chain anyway).
+let custom = null; // { url, only }
+function validEndpoint(v) {
+  if (!v || typeof v.url !== 'string' || v.url.length > 300) return null;
+  let u;
+  try { u = new URL(v.url); } catch { return null; }
+  const local = u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
+  if (u.protocol !== 'https:' && !local) return null;
+  return { url: u.href, only: v.only === true };
+}
+const endpoints = () => (!custom ? chain.rpcs : custom.only ? [custom.url] : [custom.url, ...chain.rpcs.filter((u) => new URL(u).href !== custom.url)]);
+const needed = () => (custom && custom.only ? 1 : 2);
 
 /* ── stored replies ──────────────────────────────────────────────────────── */
 
@@ -50,12 +73,66 @@ async function keep(entries) {
   } catch { /* not kept */ }
 }
 
+const SETTING = `${OWN}store/setting/endpoint`;
+const settingLoaded = (async () => {
+  try {
+    const hit = await (await store()).match(SETTING);
+    custom = hit ? validEndpoint(await hit.json()) : null;
+  } catch { custom = null; }
+})();
+
+/* ── the viewer's own files ──────────────────────────────────────────────── */
+
+// The viewer's pages and scripts come from its host. A copy of each is kept, and served when the host cannot
+// be reached, but only if its SHA-256 is the one this worker was built with (files.js): a copy that a
+// project's scripts replaced in storage is not served.
+const ownKey = (path) => `${OWN}store/own${path}`;
+const sha256 = async (bytes) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (x) => x.toString(16).padStart(2, '0')).join('');
+// Fetch every viewer file once and keep the ones that match, so the info page and its styles are there later
+// even if the reader never opened them while the host was up.
+async function keepOwnFiles() {
+  try {
+    const cache = await store();
+    await Promise.all(Object.entries(FILES).map(async ([path, sum]) => {
+      if (await cache.match(ownKey(path))) return;
+      const r = await fetch(path, { cache: 'no-cache' });
+      if (!r.ok) return;
+      const body = await r.arrayBuffer();
+      if (await sha256(body) === sum) await cache.put(ownKey(path), new Response(body, { headers: { 'content-type': r.headers.get('content-type') || 'application/octet-stream' } }));
+    }));
+  } catch { /* the next start tries again */ }
+}
+
+async function ownFile(request) {
+  const path = new URL(request.url).pathname;
+  try {
+    const fresh = await fetch(request);
+    if (fresh.ok && FILES[path]) {
+      const copy = fresh.clone();
+      (async () => {
+        const body = await copy.arrayBuffer();
+        if (await sha256(body) === FILES[path]) await (await store()).put(ownKey(path), new Response(body, { headers: { 'content-type': copy.headers.get('content-type') || 'application/octet-stream' } }));
+      })().catch(() => {});
+    }
+    return fresh;
+  } catch (e) {
+    const hit = FILES[path] && await (await store()).match(ownKey(path));
+    if (hit) {
+      const body = await hit.arrayBuffer();
+      if (await sha256(body) === FILES[path]) {
+        return new Response(body, { headers: { 'content-type': hit.headers.get('content-type'), 'x-content-type-options': 'nosniff', 'content-security-policy': OWN_CSP, 'x-abxfs-from': 'kept copy; the host cannot be reached' } });
+      }
+    }
+    throw e;
+  }
+}
+
 // Run a read whose every reply is checked (walk, readFile). Stored replies are tried first; if they fail a
 // check the same endpoint is asked afresh, and an endpoint whose replies fail is passed over for the next one.
 // Only a size limit ends the search early: sizes are bound to the root.
 async function checkedRead(fn) {
   let worst = null;
-  for (const url of chain.rpcs) {
+  for (const url of endpoints()) {
     for (const skipStored of [false, true]) {
       const ctx = { ...ctxFor(url), store: replies, skipStored };
       try {
@@ -93,7 +170,7 @@ function onChain(url) {
 // At least two must answer and all that answer must agree.
 async function askHead() {
   const settled = (list) => list.filter((a) => a.status === 'fulfilled').map((a) => a.value);
-  const up = settled(await Promise.allSettled(chain.rpcs.map(async (url) => {
+  const up = settled(await Promise.allSettled(endpoints().map(async (url) => {
     await onChain(url);
     return { url, block: quantity(await rpc(ctxFor(url), 'eth_blockNumber', []), 'the block number') };
   })));
@@ -102,7 +179,7 @@ async function askHead() {
   const sorted = up.map((u) => u.block).sort((x, y) => x - y);
   const middle = sorted[(sorted.length - 1) >> 1];
   const near = up.filter((u) => Math.abs(u.block - middle) <= (MAX_LAG_BLOCKS[chain.id] ?? 10));
-  if (near.length < 2) throw new LookupError('rpc', `fewer than two endpoints for ${chain.name} are at the same height, and a project's current version needs two that agree`);
+  if (near.length < needed()) throw new LookupError('rpc', `fewer than two endpoints for ${chain.name} are at the same height, and a project's current version needs two that agree`);
   up.splice(0, up.length, ...near);
   const block = Math.min(...up.map((u) => u.block));
   const data = TOKEN_PARAM + word(BigInt(target.token)) + KEY_CID;
@@ -111,7 +188,7 @@ async function askHead() {
     if (res.length < 32) throw new LookupError('check', 'tokenParam returned too little');
     return { url, root: '0x' + Array.from(res.subarray(0, 32), (x) => x.toString(16).padStart(2, '0')).join('') };
   })));
-  if (got.length < 2) throw new LookupError('rpc', `fewer than two endpoints answered at block ${block}`);
+  if (got.length < needed()) throw new LookupError('rpc', `fewer than two endpoints answered at block ${block}`);
   if (new Set(got.map((g) => g.root)).size > 1) throw new LookupError('check', `the endpoints disagree about this project's current version at block ${block} (${got.map((g) => host(g.url)).join(', ')})`);
   return { root: got[0].root, sources: got.map((g) => host(g.url)), block };
 }
@@ -317,17 +394,28 @@ async function answer(event) {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin || url.pathname.startsWith(OWN)) return;
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith(OWN)) {
+    // The worker script and its imports are fetched by the browser itself and never pass through here.
+    if (request.method === 'GET' && !url.pathname.startsWith(`${OWN}store/`)) event.respondWith(ownFile(request));
+    return;
+  }
   if (request.method !== 'GET' && request.method !== 'HEAD') return void event.respondWith(new Response(null, { status: 405 }));
   if (!target || !chain) return; // the start page explains
-  event.respondWith(answer(event));
+  event.respondWith(settingLoaded.then(() => answer(event)));
 });
 
 // The info page asks what this worker is showing and what it has checked.
 self.addEventListener('message', (event) => {
-  if (!event.data || event.data.type !== 'abxfs-info' || !event.ports[0]) return;
+  if (!event.data || !event.ports[0]) return;
+  if (event.data.type === 'abxfs-endpoint') return void event.waitUntil(setEndpoint(event.data.value).then((r) => event.ports[0].postMessage(r)));
+  if (event.data.type !== 'abxfs-info') return;
   event.waitUntil((async () => {
-    const out = { target, chain: chain && { name: chain.name, id: chain.id, endpoints: chain.rpcs.map(host) } };
+    await settingLoaded;
+    const out = {
+      target, build: BUILD, files: FILES, custom,
+      chain: chain && { name: chain.name, id: chain.id, endpoints: endpoints().map(host), needed: needed() },
+    };
     try {
       if (!target || !chain) throw new Error('this address does not name a project or a root this viewer reads');
       const root = await currentRoot();
@@ -335,7 +423,7 @@ self.addEventListener('message', (event) => {
       out.root = root;
       out.kind = tree.kind;
       out.unnamed = tree.unnamed;
-      out.files = [...tree.files].map(([path, f]) => ({
+      out.project = [...tree.files].map(([path, f]) => ({
         path, cid: f.cid, size: f.info.size, mime: f.info.mime, codec: f.info.codecName, checked: bodies.has(f.cid),
       }));
     } catch (e) {
@@ -345,6 +433,29 @@ self.addEventListener('message', (event) => {
     event.ports[0].postMessage(out);
   })());
 });
+
+// The info page sets or clears the reader's own endpoint. It is saved only after it has answered for this chain.
+async function setEndpoint(value) {
+  await settingLoaded;
+  try {
+    if (value === null) {
+      custom = null;
+      await (await store()).delete(SETTING);
+    } else {
+      const next = validEndpoint(value);
+      if (!next) return { error: 'An endpoint is an https:// address, or http:// on localhost for a node on this computer.' };
+      if (!chain) return { error: 'This address does not name a chain this viewer reads.' };
+      chainOk.delete(next.url);
+      await onChain(next.url);
+      custom = next;
+      await (await store()).put(SETTING, new Response(JSON.stringify(next)));
+    }
+    head = null;
+    return { ok: true, custom };
+  } catch (e) {
+    return { error: e.message || String(e) };
+  }
+}
 
 // For tests/head-rule.mjs, which runs the current-root rule against made-up endpoints.
 export { askHead };

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent / "view-dist"
-CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https:; "
+CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; "
        "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 # What the host serves as files: everything the build wrote except its own header rules.
 FILES = {f.relative_to(ROOT).as_posix() for f in ROOT.rglob("*") if f.is_file()} - {"_headers"}

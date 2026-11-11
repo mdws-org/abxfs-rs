@@ -36,6 +36,43 @@
                 be opened.
             </p>
 
+            <h2>Your own endpoint</h2>
+            <p>
+                By default the files are read through public endpoints run by other people. If you run a node, or
+                trust one endpoint, name it here: it is asked first. With "only this one" nothing is asked of any
+                other server, and the rule that two endpoints must agree on a project's current root is replaced by
+                your trust in yours.
+            </p>
+            <p>
+                <label for="endpoint-url">Endpoint address</label>
+                <input id="endpoint-url" type="url" class="mono" placeholder="https://… or http://localhost:8545"
+                    spellcheck="false" autocomplete="off" autocapitalize="off" />
+            </p>
+            <p>
+                <label><input id="endpoint-only" type="checkbox" /> Ask only this one</label>
+            </p>
+            <p>
+                <button type="button" id="endpoint-save">Save</button>
+                <button type="button" id="endpoint-clear">Use the public endpoints</button>
+                <span id="endpoint-status" class="soft" role="status"></span>
+            </p>
+
+            <h2>The viewer itself</h2>
+            <p>
+                The viewer's own code comes from this address's web host and is the one thing here that is not
+                checked against the chain. This is the build the reader is running. The same files, built from
+                <a href="https://github.com/mdws-org/abxfs-rs">the repository</a> with
+                <span class="mono">tools/build-view.py</span>, give the same hashes on any host. Once a project
+                has been opened, the reader and these pages keep working if the host goes away.
+            </p>
+            <p>Build <span id="build" class="mono"></span></p>
+            <div class="scroll">
+                <table id="viewer-files">
+                    <thead><tr><th>File</th><th>SHA-256</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
             <h2>Kept in this browser</h2>
             <p>
                 Only raw replies from the chain are kept, so a later visit asks for less. They are not trusted: a
