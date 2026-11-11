@@ -13,6 +13,8 @@ import { gatewayUrl, parseHost } from './target.js';
 const TOKEN_PARAM = '0x6bd39222'; // tokenParam(uint256,bytes32)
 const KEY_CID = '61627866732e636964'.padEnd(64, '0'); // "abxfs.cid"
 const HEAD_TTL_MS = 60_000;
+// About two minutes of blocks on each chain: how far an endpoint may be from the middle one.
+const MAX_LAG_BLOCKS = { 1: 10, 8453: 60, 84532: 60, 42161: 480, 421614: 480, 11155111: 10 };
 const STORE = 'abxfs-view-v2';
 const OWN = '/_abxfs/';
 const READS_AT_ONCE = 3;
@@ -95,7 +97,13 @@ async function askHead() {
     await onChain(url);
     return { url, block: quantity(await rpc(ctxFor(url), 'eth_blockNumber', []), 'the block number') };
   })));
-  if (up.length < 2) throw new LookupError('rpc', `fewer than two endpoints answered for ${chain.name}, and a project's current version needs two that agree`);
+  // An endpoint whose block is far from the others' is left out: a low one would pull the read back to an
+  // older version of the project, a high one is not the chain the others see.
+  const sorted = up.map((u) => u.block).sort((x, y) => x - y);
+  const middle = sorted[(sorted.length - 1) >> 1];
+  const near = up.filter((u) => Math.abs(u.block - middle) <= (MAX_LAG_BLOCKS[chain.id] ?? 10));
+  if (near.length < 2) throw new LookupError('rpc', `fewer than two endpoints for ${chain.name} are at the same height, and a project's current version needs two that agree`);
+  up.splice(0, up.length, ...near);
   const block = Math.min(...up.map((u) => u.block));
   const data = TOKEN_PARAM + word(BigInt(target.token)) + KEY_CID;
   const got = settled(await Promise.allSettled(up.map(async ({ url }) => {
