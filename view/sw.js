@@ -15,7 +15,7 @@ const TOKEN_PARAM = '0x6bd39222'; // tokenParam(uint256,bytes32)
 const KEY_CID = '61627866732e636964'.padEnd(64, '0'); // "abxfs.cid"
 const HEAD_TTL_MS = 60_000;
 // About two minutes of blocks on each chain: how far an endpoint may be from the middle one.
-const MAX_LAG_BLOCKS = { 1: 10, 8453: 60, 84532: 60, 42161: 480, 421614: 480, 11155111: 10 };
+const MAX_LAG_BLOCKS = { 1: 10, 8453: 60, 84532: 60, 42161: 480, 421614: 480, 4663: 1200, 11155111: 10 };
 const STORE = 'abxfs-view-v2';
 const OWN = '/_abxfs/';
 const OWN_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";

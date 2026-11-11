@@ -29,7 +29,7 @@ abxfs-rs read <root> --chain <name> [--rpc URL] [--out PATH] [--in-flight N] [--
 abxfs-rs verify <root> <local folder or file> --chain <name> [--rpc URL] [--in-flight N] [--include-hidden] [--no-fastlz] [--stats]
 ```
 
-`--chain` is one of `base`, `base-sepolia`, `ethereum`, `sepolia`, `arbitrum-one`, `arbitrum-sepolia`; without `--rpc` the chain's public endpoint (the first the SDK lists) is used. Every request is a read (`eth_chainId`, `eth_call`, `eth_getCode`); nothing is signed or sent.
+`--chain` is one of `base`, `base-sepolia`, `ethereum`, `sepolia`, `arbitrum-one`, `arbitrum-sepolia`, `robinhood`; without `--rpc` the chain's public endpoint (the first the SDK lists) is used. Every request is a read (`eth_chainId`, `eth_call`, `eth_getCode`); nothing is signed or sent.
 
 `read` walks the root breadth-first, all pending objects at once, so the round trips grow with the tree's depth, not its size:
 
