@@ -36,6 +36,46 @@
                 be opened.
             </p>
 
+            <h2>Your own endpoint</h2>
+            <p>
+                By default everything is read through public endpoints run by other people. If you run a node, name
+                it here. It is then asked first for every read that is checked against the root: the folder, the
+                file records and the file contents. If it fails, the public endpoints are asked.
+            </p>
+            <p>
+                A project's current root is still read from the public endpoints, and two of them must agree. Your
+                endpoint is left out of that on purpose. This setting is kept where the project's own scripts can
+                change it, so it is only ever used for reads that are checked. For the same reason, do not enter an
+                address with a key in it.
+            </p>
+            <p>
+                <label for="endpoint-url">Endpoint address</label>
+                <input id="endpoint-url" type="url" class="mono" placeholder="https://… or http://localhost:8545"
+                    spellcheck="false" autocomplete="off" autocapitalize="off" />
+            </p>
+            <p>
+                <button type="button" id="endpoint-save">Save</button>
+                <button type="button" id="endpoint-clear">Use the public endpoints</button>
+                <span id="endpoint-status" class="soft" role="status"></span>
+            </p>
+
+            <h2>The viewer itself</h2>
+            <p>
+                The viewer's own code comes from this address's web host and is the one thing here that is not
+                checked against the chain. This is the build the reader is running. The same files, built from
+                <a href="https://github.com/mdws-org/abxfs-rs">the repository</a> with
+                <span class="mono">tools/build-view.py</span>, give the same hashes on any host. Once a project
+                has been opened, the reader and these pages keep working if the host goes away, and these pages are served from the copies that match this build even while the host answers.
+            </p>
+            <p>Build <span id="build" class="mono"></span></p>
+            <p id="host-match" role="status"></p>
+            <div class="scroll">
+                <table id="viewer-files">
+                    <thead><tr><th>File</th><th>SHA-256</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
             <h2>Kept in this browser</h2>
             <p>
                 Only raw replies from the chain are kept, so a later visit asks for less. They are not trusted: a
