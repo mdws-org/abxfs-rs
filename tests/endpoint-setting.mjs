@@ -1,4 +1,4 @@
-// The reader's own endpoint, set from the info page.
+// The reader's own endpoint, set from the info page, and what a project's own scripts can do with that setting.
 // usage: CHROME_PATH=... node tests/endpoint-setting.mjs http://<base project label>.localhost:<port>/
 import { createRequire } from 'node:module';
 const require = createRequire('/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
@@ -8,39 +8,63 @@ const browser = await chromium.launch({ headless: true, executablePath: process.
 const page = await (await browser.newContext()).newPage();
 const errs = [];
 page.on('console', (m) => /Content Security|Refused/.test(m.text()) && errs.push(m.text().slice(0, 140)));
+const opened = () => page.waitForFunction(() => navigator.serviceWorker.controller && !document.querySelector('script[src="/_abxfs/boot.js"]'), null, { timeout: 120000 });
+const infoReady = () => page.waitForFunction(() => document.querySelector('#host-match').textContent.length > 0, null, { timeout: 90000 });
 await page.goto(address, { waitUntil: 'load' });
-await page.waitForFunction(() => navigator.serviceWorker.controller && !document.querySelector('script[src="/_abxfs/boot.js"]'), null, { timeout: 120000 });
+await opened();
 const title = await page.title();
 const info = new URL('/_abxfs/info.html', address).href;
-const set = async (url, only) => {
+const facts = async () => (await page.textContent('#facts')).replace(/\s+/g, ' ');
+const set = async (url) => {
   await page.goto(info, { waitUntil: 'load' });
-  await page.waitForFunction(() => document.querySelector('#build').textContent.length === 64, null, { timeout: 60000 });
+  await infoReady();
   await page.fill('#endpoint-url', url);
-  await page.setChecked('#endpoint-only', only);
   await page.click('#endpoint-save');
   // A refused endpoint leaves a message; an accepted one reloads the page.
   const status = await Promise.race([
     page.waitForFunction(() => /Not saved/.test(document.querySelector('#endpoint-status')?.textContent || ''), null, { timeout: 60000 }).then(() => page.textContent('#endpoint-status')),
     page.waitForNavigation({ waitUntil: 'load', timeout: 60000 }).then(() => 'saved'),
   ]);
-  await page.waitForFunction(() => document.querySelector('#build').textContent.length === 64, null, { timeout: 60000 });
-  return { status, endpoints: (await page.textContent('#facts')).match(/Endpoints(.*)$/)?.[1] };
+  await infoReady();
+  return { status: status.slice(0, 70), yours: (await facts()).match(/Your endpoint(.*?)(Root|$)/)?.[1]?.trim() || null };
 };
-const results = { title, build: null };
-results['not a URL'] = await set('javascript:alert(1)', false);
-results['plain http, not local'] = await set('http://example.org/rpc', false);
-results['another chain (Ethereum endpoint on a Base project)'] = await set('https://ethereum-rpc.publicnode.com', false);
-results['own endpoint first'] = await set('https://base.drpc.org', false);
-results['own endpoint only'] = await set('https://base-rpc.publicnode.com', true);
-results.build = await page.textContent('#build');
-results.viewerFiles = await page.locator('#viewer-files tbody tr').count();
+const results = { title };
+let bad = 0;
+const expect = (name, ok, got) => { results[name] = { ok, got }; bad += !ok; };
+for (const [name, url] of [['not a URL', 'javascript:alert(1)'], ['plain http, not local', 'http://example.org/rpc'], ['a password in the address', 'https://user:secret@base.drpc.org/'], ['another chain', 'https://ethereum-rpc.publicnode.com']]) {
+  const r = await set(url);
+  expect(`refused: ${name}`, /Not saved/.test(r.status) && !r.yours, r);
+}
+const saved = await set('https://base.drpc.org');
+expect('saved, and asked first for checked reads', saved.status === 'saved' && /base\.drpc\.org/.test(saved.yours || ''), saved);
+expect('the info page says the host serves this build', /serves exactly these files/.test(await page.textContent('#host-match')), await page.textContent('#host-match'));
+expect('the info page came from the kept copy', /kept copy/.test(await page.evaluate(async () => (await fetch('/_abxfs/info.js')).headers.get('x-abxfs-from'))), '');
+
+// A project's own script plants an endpoint in storage and sends the worker a message, then the worker restarts.
 await page.goto(address, { waitUntil: 'load' });
-results['project with only that endpoint'] = await page.title();
+const planted = await page.evaluate(async () => {
+  const cache = await caches.open((await caches.keys()).find((n) => n.startsWith('abxfs-view-')));
+  await cache.put('/_abxfs/store/setting/endpoint', new Response('https://example.org/attacker-rpc'));
+  const channel = new MessageChannel();
+  const reply = new Promise((ok) => { channel.port1.onmessage = (e) => ok(e.data); setTimeout(() => ok('no reply'), 3000); });
+  navigator.serviceWorker.controller.postMessage({ type: 'abxfs-endpoint', value: 'https://example.org/attacker-rpc' }, [channel.port2]);
+  return reply;
+});
+expect('a message from a project page is not answered', planted === 'no reply', planted);
+const cdp = await page.context().newCDPSession(page);
+await cdp.send('ServiceWorker.enable');
+await cdp.send('ServiceWorker.stopAllWorkers');
+await page.reload({ waitUntil: 'load' });
+expect('with a planted endpoint the project still opens', (await page.title()) === title, await page.title());
 await page.goto(info, { waitUntil: 'load' });
-await page.waitForFunction(() => document.querySelector('#build').textContent.length === 64);
+await infoReady();
+const after = await facts();
+const agreed = after.match(/Current root\s*(agreed by .*?) at block/)?.[1] || '';
+expect('the current root still came from public endpoints', /mainnet\.base\.org/.test(agreed) && !/example\.org/.test(agreed), agreed);
 await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), page.click('#endpoint-clear')]);
-await page.waitForFunction(() => document.querySelector('#build').textContent.length === 64);
-results.cleared = (await page.textContent('#facts')).match(/Endpoints(.*)$/)?.[1];
-results.cspErrors = errs;
+await infoReady();
+expect('cleared', !/Your endpoint/.test(await facts()), '');
+expect('no security-policy errors', errs.length === 0, errs);
 console.log(JSON.stringify(results, null, 1));
 await browser.close();
+process.exit(bad ? 1 : 0);

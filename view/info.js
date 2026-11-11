@@ -23,7 +23,8 @@ function show(info) {
     if (info.head) fact(dl, 'Current root', `agreed by ${info.head.sources.join(', ')} at block ${info.head.block.toLocaleString('en-US')}${info.head.stale ? '; read earlier, the endpoints cannot be reached now' : ''}`);
   }
   if (info.root) fact(dl, 'Root', info.root, true);
-  fact(dl, 'Endpoints', info.chain.endpoints.join(', ') + (info.chain.needed === 1 ? ' (yours only: nothing is asked of any other server)' : ''));
+  fact(dl, 'Endpoints', info.chain.endpoints.join(', '));
+  if (info.custom) fact(dl, 'Your endpoint', `${info.custom}, asked first for every checked read`);
   showViewer(info);
   dl.hidden = false;
   if (info.error) {
@@ -63,8 +64,11 @@ function showViewer(info) {
     return tr;
   });
   $('#viewer-files tbody').replaceChildren(...rows);
-  $('#endpoint-url').value = info.custom ? info.custom.url : '';
-  $('#endpoint-only').checked = Boolean(info.custom && info.custom.only);
+  const differs = (info.host || []).filter(([, state]) => state === 'differs').map(([path]) => path);
+  const down = (info.host || []).filter(([, state]) => state === 'unreachable').length;
+  $('#host-match').textContent = differs.length ? `This host now serves different files from this build: ${differs.join(', ')}.`
+    : down ? 'The host cannot be reached now. These pages are the copies kept in this browser, and they match this build.'
+      : 'Checked just now: this host serves exactly these files.';
 }
 
 async function worker() {
@@ -80,7 +84,7 @@ async function setEndpoint(value) {
   out.textContent = value ? 'Asking that endpoint…' : 'Clearing…';
   const channel = new MessageChannel();
   channel.port1.onmessage = (e) => {
-    out.textContent = e.data.error ? `Not saved: ${e.data.error}` : value ? 'Saved. It is asked first from now on.' : 'Cleared.';
+    out.textContent = e.data.error ? `Not saved: ${e.data.error}` : value ? 'Saved.' : 'Cleared.';
     if (!e.data.error) location.reload();
   };
   w.postMessage({ type: 'abxfs-endpoint', value }, [channel.port2]);
@@ -113,7 +117,7 @@ async function reset() {
 }
 
 $('#reset').addEventListener('click', reset);
-$('#endpoint-save').addEventListener('click', () => setEndpoint({ url: $('#endpoint-url').value.trim(), only: $('#endpoint-only').checked }));
+$('#endpoint-save').addEventListener('click', () => setEndpoint($('#endpoint-url').value.trim()));
 $('#endpoint-clear').addEventListener('click', () => setEndpoint(null));
 
 ask();
