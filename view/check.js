@@ -7,7 +7,6 @@ import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from 
 import { judge, judgeComputed, judgeRollup } from './verdict.js';
 import { baseClaims, baseTokenParam } from './base.js';
 import { TOKEN_URI, abiString, agreedTokenUri, generatorPage, readTokenUri, repliesAt } from './token.js';
-import { computedAt } from './evm-state.js';
 import { ROLLUPS as ARBITRUM, confirmed, rollupTokenParam } from './arbitrum.js';
 import { BUILD } from './files.js';
 
@@ -145,6 +144,29 @@ async function run() {
   say(v.state, texts[v.state], v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.');
 }
 
+// A contract's call, run in a worker (view/evm-worker.js) over state read by proof at the finalized block. The
+// worker is ended when a run passes RUN_MS, which no limit inside the run can fail to do, and a new one is started
+// for the next call. Returns what computedAt returns, without its state; never throws.
+const RUN_MS = 200_000;
+let worker = null, runs = 0;
+function computedAt(args) {
+  return new Promise((resolve) => {
+    const id = ++runs;
+    let timer = 0;
+    const end = (result) => { clearTimeout(timer); if (worker) { worker.removeEventListener('message', heard); worker.removeEventListener('error', failed); } resolve(result); };
+    const stop = (why) => { if (worker) worker.terminate(); worker = null; end({ done: false, why }); };
+    const heard = (e) => { if (e.data && e.data.id === id) end(e.data.result); };
+    const failed = (e) => stop(`the worker that runs the contract's code failed: ${e.message || 'it could not be started'}`);
+    try {
+      worker ??= new Worker(new URL('./evm-worker.js', import.meta.url), { type: 'module' });
+      worker.addEventListener('message', heard);
+      worker.addEventListener('error', failed);
+      timer = setTimeout(() => stop(`the run was ended after ${RUN_MS / 1000} seconds`), RUN_MS);
+      worker.postMessage({ id, ...args });
+    } catch (e) { stop(`this browser could not start a worker to run the contract's code: ${e.message || e}`); }
+  });
+}
+
 // No ABX FS root: what the contract's tokenURI holds, or what ABX's generator contract builds for a code project,
 // as the endpoints agree on it.
 async function token(chain, target, head, openUrl) {
@@ -194,7 +216,7 @@ async function token(chain, target, head, openUrl) {
     if (computed.done && computed.success && read.field === 'generator') {
       // The generator's document is shown because of two other replies: the generator's status for the collection,
       // and a tokenURI that holds no page. Each is run here too, so that the choice does not rest on the endpoints.
-      const again = (c) => computedAt({ chainId: chain.id, fin, urls: PROOF_ENDPOINTS[chain.id], ...c, state: computed.state });
+      const again = (c) => computedAt({ chainId: chain.id, fin, urls: PROOF_ENDPOINTS[chain.id], ...c }); // the worker keeps what it proved at this block
       const status = await again(shown.status.call);
       supporting.push({ ok: status.done && status.success && status.output === shown.status.reply, why: 'the generator\'s status for this collection, which says the page is built on chain, was not recomputed to the same reply' });
       const uri = await again(got ? got.call : { to: target.org, data: TOKEN_URI + BigInt(target.token).toString(16).padStart(64, '0') });

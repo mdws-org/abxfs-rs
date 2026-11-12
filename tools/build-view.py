@@ -12,7 +12,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 SITE, VIEW, OUT = HERE / "site", HERE / "view", HERE / "view-dist"
-OWN = ["boot.js", "sw.js", "info.html", "info.js", "check.html", "check.js", "view.css"]
+OWN = ["boot.js", "sw.js", "info.html", "info.js", "check.html", "check.js", "evm-worker.js", "view.css"]
 SHARED = ["chain.js", "keccak-lookup.js", "target.js", "light.js", "proof.js", "proved.js", "verdict.js", "checkpoint.js", "base.js", "arbitrum.js", "token.js", "bamfs.js", "evm.js", "evm-state.js"]
 VENDOR = SITE / "vendor" / "noble"
 

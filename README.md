@@ -191,7 +191,7 @@ An endpoint is asked which accounts and storage words the call touches (`eth_cre
 
 A generator document is shown because of two other replies: the generator's status for the collection, and a `tokenURI` that holds no page. Both calls are run here as well, and "recomputed" is said only when they give what the endpoints gave. When the document loads a library from an address off the chain, the check page says that nothing covers what that address serves.
 
-A run stops after 60 seconds of computing or 120 seconds of fetching, and at 600 requests. What a hint asks for may use half of those requests and 4,000 storage words.
+The call runs in a worker (`view/evm-worker.js`), so the page stays responsive. A run stops after 60 seconds of computing or 120 seconds of fetching, and at 600 requests; the page ends the worker itself after 200 seconds. A browser that cannot start a worker gets "Agreed by the endpoints. Not proved." What a hint asks for may use half of those requests and 4,000 storage words.
 
 The viewer's own pages (the service worker) still serve the reply the endpoints agree on. Only the check page says whether that reply was also recomputed.
 
@@ -251,6 +251,7 @@ node tests/proved-live.mjs                   # live: a project's root by proof t
 node tests/base-live.mjs                     # live: Base's anchor and newest claims, and a project's root at each
 node tests/arbitrum-live.mjs                 # live: the confirmed assertion of Arbitrum One and Robinhood Chain
 node tests/token-page.mjs                    # live: token pages in a browser equal an independent read of tokenURI
+node tests/worker-page.mjs                   # live: the check page's worker runs a call, is ended when it never answers, and may be missing
 node tests/evm-context-live.mjs              # live: gas left, base fee, caller and 15 more values, the same here and on the endpoints
 node tests/evm-live.mjs                      # live: 8 real calls run here over proved state equal eth_call at the finalized block
 EVM_DIR=<dir> node tests/evm-fuzz.mjs 3000   # generated programs here and in @ethereumjs/evm: the same outcome, output and gas
