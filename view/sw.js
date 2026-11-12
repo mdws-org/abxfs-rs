@@ -224,16 +224,18 @@ async function askHead() {
 
 const PROOF_TTL_MS = 5 * 60_000; // finality moves about every six and a half minutes
 const PROOF_WAIT_MS = 20_000;
+const SWITCH_TTL_MS = 60_000;
 
 // The host can turn proving off for every installed viewer by serving { "proof": false } here: a wrong proof
-// then stops nobody. It can only take the comparison away. A host that cannot be reached leaves proving on.
+// then stops nobody. It can only take the comparison away, and once this worker has seen it off it stays off
+// for the worker's life. A host that cannot be reached leaves proving as it was.
 let switchAt = 0, switchOn = true;
 async function proofAllowed() {
-  if (Date.now() - switchAt < PROOF_TTL_MS) return switchOn;
+  if (!switchOn || Date.now() - switchAt < SWITCH_TTL_MS) return switchOn;
   switchAt = Date.now();
   try {
-    const r = await fetch(`${OWN}switch.json`, { cache: 'no-store' });
-    if (r.ok) switchOn = (await r.json()).proof !== false;
+    const r = await fetch(`${OWN}switch.json`, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+    if (r.ok && (await r.json()).proof === false) switchOn = false;
   } catch { /* unreachable: unchanged */ }
   return switchOn;
 }
@@ -246,7 +248,8 @@ function prove() {
     const urls = PROOF_ENDPOINTS[chain.id];
     const fin = await finalizedBlock({ chainId: chain.id, checkpoint: CHECKPOINTS[chain.id].root, beacons: BEACONS[chain.id] });
     const proved = await provedTokenParam({ fin, urls, org: target.org, token: target.token });
-    const atFinalized = proved.known ? await tokenParamAt({ urls, org: target.org, token: target.token, block: proved.block.number }) : [];
+    // Asked of the proof endpoints and of the endpoints the current root comes from, by block hash.
+    const atFinalized = proved.known ? await tokenParamAt({ urls: [...urls, ...chain.rpcs], org: target.org, token: target.token, blockHash: proved.block.hash }) : [];
     return { proved, atFinalized };
   })();
   proofMemo = { at: Date.now(), value };
@@ -260,26 +263,34 @@ function prove() {
 async function settle(got, deps = { allowed: proofAllowed, prove }) {
   if (!chain || !CHECKPOINTS[chain.id] || !PROOF_ENDPOINTS[chain.id]) return { state: 'agreed', reason: `no light client for ${chain ? chain.name : 'this chain'}` };
   if (!await deps.allowed()) return { state: 'agreed', reason: 'proving is switched off on this host' };
-  let found;
-  try {
-    found = await Promise.race([deps.prove(), new Promise((_, no) => setTimeout(() => no(new Error('the proof took too long')), PROOF_WAIT_MS))]);
-  } catch (e) {
-    return { state: 'agreed', reason: `no proof: ${e.message || e}` };
-  }
-  const verdict = { ...judge({ ...found, agreedHead: got }), proved: found.proved, atFinalized: found.atFinalized };
-  if (verdict.state === 'mismatch') {
+  const decide = (found) => {
+    const verdict = { ...judge({ ...found, agreedHead: got }), proved: found.proved, atFinalized: found.atFinalized };
+    if (verdict.state !== 'mismatch') return verdict;
     const e = new LookupError('mismatch', verdict.reason);
     e.verdict = verdict;
     e.agreed = got;
     throw e;
+  };
+  const proving = deps.prove();
+  let found;
+  try {
+    found = await Promise.race([proving, new Promise((_, no) => setTimeout(() => no(new Error('the proof took too long')), deps.waitMs ?? PROOF_WAIT_MS))]);
+  } catch (e) {
+    // The page is not held longer than this, but the proof is still wanted: if it arrives and does not match,
+    // that is kept, and nothing more is served from this version.
+    proving.then((late) => { try { decide(late); } catch (m) { lateMismatch = { at: Date.now(), error: m }; head = null; } }, () => {});
+    return { state: 'agreed', reason: `no proof: ${e.message || e}` };
   }
-  return verdict;
+  return decide(found);
 }
+// A mismatch that arrived after a page had already been answered. It stands for as long as a proof is kept.
+let lateMismatch = null;
 
 let head = null; // { root, sources, block, at, stale, verdict }
 let asking = null;
 function currentRoot() {
   if (target.kind === 'root') return Promise.resolve(target.root);
+  if (lateMismatch && Date.now() - lateMismatch.at < PROOF_TTL_MS) return Promise.reject(lateMismatch.error);
   if (head && Date.now() - head.at < HEAD_TTL_MS) return Promise.resolve(head.root);
   asking ||= (async () => {
     try {
@@ -573,4 +584,5 @@ async function setEndpoint(value) {
 }
 
 // For tests/head-rule.mjs and tests/settle.mjs, which run these rules against made-up answers.
-export { askHead, settle };
+const standingMismatch = () => (lateMismatch && Date.now() - lateMismatch.at < PROOF_TTL_MS ? lateMismatch.error : null);
+export { askHead, proofAllowed, settle, standingMismatch };

@@ -41,18 +41,42 @@ function paramSlots(token, key = KEY_CID) {
   return [value, '0x' + word(BigInt(value) + 1n)];
 }
 
+// A reply's body as JSON, refused past `limit` bytes without reading the rest: a server cannot make the viewer
+// hold an endless reply.
+async function boundedJson(r, limit, who) {
+  if (Number(r.headers.get('content-length')) > limit) throw new ProvedError('rpc', `${who} sent a reply over ${limit} bytes`);
+  const reader = r.body.getReader();
+  const parts = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > limit) { reader.cancel().catch(() => {}); throw new ProvedError('rpc', `${who} sent a reply over ${limit} bytes`); }
+    parts.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) { all.set(part, at); at += part.length; }
+  try { return JSON.parse(new TextDecoder().decode(all)); } catch { throw new ProvedError('rpc', `${who} did not send JSON`); }
+}
+const RPC_REPLY_BYTES = 1_000_000; // an account proof and two storage proofs are about 20 KB
+const BEACON_REPLY_BYTES = 2_000_000; // eight period updates are about 400 KB
+
 // One JSON-RPC call to one endpoint, with a deadline. Nothing it returns is believed unchecked.
 async function call(url, method, params, ms = 15_000) {
+  const who = new URL(url).host;
   const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(ms) });
-  if (!r.ok) throw new ProvedError('rpc', `${new URL(url).host} answered ${r.status}`);
-  const j = await r.json();
-  if (j.error || j.result === undefined) throw new ProvedError('rpc', `${new URL(url).host}: ${(j.error && j.error.message) || 'no result'}`);
+  if (!r.ok) throw new ProvedError('rpc', `${who} answered ${r.status}`);
+  const j = await boundedJson(r, RPC_REPLY_BYTES, who);
+  if (!j || j.error || j.result === undefined) throw new ProvedError('rpc', `${who}: ${(j && j.error && j.error.message) || 'no result'}`);
   return j.result;
 }
 const beaconGet = (base) => async (path) => {
+  const who = new URL(base).host;
   const r = await fetch(base + path, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20_000) });
-  if (!r.ok) throw new ProvedError('rpc', `${new URL(base).host} answered ${r.status}`);
-  return r.json();
+  if (!r.ok) throw new ProvedError('rpc', `${who} answered ${r.status}`);
+  return boundedJson(r, BEACON_REPLY_BYTES, who);
 };
 
 // The newest finalized execution block, from the shipped block root. Each beacon server is tried in turn; a
@@ -83,7 +107,7 @@ async function provedTokenParam({ fin, urls, org, token, key = KEY_CID }) {
       const header = executionHeader(fin.executionBlockHash, await call(url, 'eth_getBlockByHash', [fin.executionBlockHash, false]));
       const reply = await call(url, 'eth_getProof', [org, slots, '0x' + header.number.toString(16)]);
       if (!reply || !Array.isArray(reply.accountProof) || !Array.isArray(reply.storageProof) || reply.storageProof.length !== 2) throw new ProvedError('check', 'the endpoint did not return the proofs asked for');
-      const at = { block: { number: header.number, hash: fin.executionBlockHash, timestamp: header.timestamp }, finalizedSlot: fin.finalizedSlot, participants: fin.participants, checkpointSlot: fin.checkpointSlot, via: new URL(url).host };
+      const at = { block: { number: header.number, hash: fin.executionBlockHash, timestamp: header.timestamp }, finalizedSlot: fin.finalizedSlot, participants: fin.participants, checkpointSlot: fin.checkpointSlot, shipped: Boolean(fin.shipped), via: new URL(url).host };
       const account = accountAt(header.stateRoot, org, reply.accountProof);
       if (!account) return { known: false, why: 'there is no contract at this address in the finalized block', ...at };
       if (account.codeHash !== COLLECTION_CODE_HASH) return { known: false, why: 'the contract at this address is not an ABX collection this viewer knows the layout of', ...at };
@@ -102,11 +126,14 @@ async function provedTokenParam({ fin, urls, org, token, key = KEY_CID }) {
 
 // What the endpoints return for tokenParam(token, key) at one block, asked of each `url` at once.
 // Returns [[host, root], ...] for those that answered; the caller needs at least two.
+// With `blockHash` the block is named by its hash (EIP-1898), so an endpoint cannot answer for another block
+// or another chain without saying so: one that does not know the hash gives an error and is left out.
 const TOKEN_PARAM = '0x6bd39222'; // tokenParam(uint256,bytes32)
-async function tokenParamAt({ urls, org, token, block, key = KEY_CID }) {
+async function tokenParamAt({ urls, org, token, block, blockHash, key = KEY_CID }) {
   const data = TOKEN_PARAM + word(token) + key;
-  const all = await Promise.allSettled(urls.map(async (url) => {
-    const res = await call(url, 'eth_call', [{ to: org, data }, '0x' + block.toString(16)], 10_000);
+  const at = blockHash ? { blockHash } : '0x' + block.toString(16);
+  const all = await Promise.allSettled([...new Set(urls)].map(async (url) => {
+    const res = await call(url, 'eth_call', [{ to: org, data }, at], 10_000);
     if (typeof res !== 'string' || !/^0x[0-9a-f]{64,}$/i.test(res)) throw new ProvedError('check', 'tokenParam returned too little');
     return [new URL(url).host, res.slice(0, 66).toLowerCase()];
   }));

@@ -42,5 +42,40 @@ const s = await base.settle(head(B), { allowed: on, prove: prove({ proved, atFin
 const ok = s.state === 'agreed' && asked === 0;
 bad += !ok;
 console.log(`${ok ? 'ok  ' : 'FAIL'} a chain with no light client: ${s.state}, proof asked for ${asked} time(s)`);
-console.log(bad ? `${bad} FAILED` : `ok: ${CASES.length + 1} cases`);
+// A proof that arrives after the page was answered. If it does not match, that must stand from then on.
+{
+  const sw = await load(`1-${ORG}-3.localhost`);
+  const slow = (value) => () => new Promise((r) => setTimeout(() => r(value), 60));
+  const quick = await sw.settle(head(B), { allowed: on, prove: slow({ proved, atFinalized: two(B) }), waitMs: 10 });
+  const before = sw.standingMismatch();
+  await new Promise((r) => setTimeout(r, 120));
+  const after = sw.standingMismatch();
+  const okLate = quick.state === 'agreed' && before === null && after && after.kind === 'mismatch';
+  bad += !okLate;
+  console.log(`${okLate ? 'ok  ' : 'FAIL'} a mismatch that arrives after the page was answered: answered as ${quick.state}, then ${after ? 'the mismatch stands' : 'nothing stands'}`);
+  const sw2 = await load(`1-${ORG}-4.localhost`);
+  await sw2.settle(head(A), { allowed: on, prove: slow({ proved, atFinalized: two(A) }), waitMs: 10 });
+  await new Promise((r) => setTimeout(r, 120));
+  const none = sw2.standingMismatch();
+  bad += none !== null;
+  console.log(`${none === null ? 'ok  ' : 'FAIL'} a late proof that matches leaves nothing standing`);
+}
+// The host's switch: off is seen and kept; a host that later says "on" again does not turn proving back on.
+{
+  const sw = await load(`1-${ORG}-1.localhost`);
+  let serve = { proof: false };
+  globalThis.fetch = async () => new Response(JSON.stringify(serve));
+  const first = await sw.proofAllowed();
+  serve = { proof: true };
+  const second = await sw.proofAllowed();
+  const ok2 = first === false && second === false;
+  bad += !ok2;
+  console.log(`${ok2 ? 'ok  ' : 'FAIL'} the switch served off, then on: ${first}, then ${second}`);
+  const fresh = await load(`1-${ORG}-2.localhost`);
+  globalThis.fetch = async () => { throw new TypeError('unreachable'); };
+  const third = await fresh.proofAllowed();
+  bad += third !== true;
+  console.log(`${third === true ? 'ok  ' : 'FAIL'} the switch cannot be reached: ${third}`);
+}
+console.log(bad ? `${bad} FAILED` : `ok: ${CASES.length + 5} cases`);
 process.exit(bad ? 1 : 0);

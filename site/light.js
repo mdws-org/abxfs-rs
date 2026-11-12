@@ -66,8 +66,9 @@ function bytes(hex, length, what) {
   return out;
 }
 const toHex = (u) => '0x' + Array.from(u, (b) => b.toString(16).padStart(2, '0')).join('');
+// A decimal string as a number. Fifteen digits at most, so that no two strings give the same number.
 function uint(s, what) {
-  if (typeof s !== 'string' || !/^(0|[1-9][0-9]{0,15})$/.test(s)) refuse(`${what} is not a number`);
+  if (typeof s !== 'string' || !/^(0|[1-9][0-9]{0,14})$/.test(s)) refuse(`${what} is not a number this client reads`);
   return Number(s);
 }
 const equal = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
@@ -182,7 +183,8 @@ function parseHeader(h, what) {
   if (h.execution_block_hash !== undefined) out.executionBlockHash = bytes(h.execution_block_hash, 32, `${what} execution block hash`);
   else {
     const e = h.execution || refuse(`${what} has no execution data`);
-    const base = BigInt(typeof e.base_fee_per_gas === 'string' && /^[0-9]{1,78}$/.test(e.base_fee_per_gas) ? e.base_fee_per_gas : refuse(`${what} base fee is not a number`));
+    const base = BigInt(typeof e.base_fee_per_gas === 'string' && /^(0|[1-9][0-9]{0,77})$/.test(e.base_fee_per_gas) ? e.base_fee_per_gas : refuse(`${what} base fee is not a number`));
+    if (base >> 256n) refuse(`${what} base fee does not fit in 256 bits`);
     out.execution = {
       parentHash: bytes(e.parent_hash, 32, 'parent hash'), feeRecipient: bytes(e.fee_recipient, 20, 'fee recipient'),
       stateRoot: bytes(e.state_root, 32, 'state root'), receiptsRoot: bytes(e.receipts_root, 32, 'receipts root'),
@@ -281,7 +283,9 @@ function validate_light_client_update(net, committee, raw, want) {
 //   now()       milliseconds; the reader's clock decides what is fresh
 // Returns { executionBlockHash, finalizedSlot, attestedSlot, signatureSlot, participants, periods, checkpointSlot }.
 async function sync({ net, checkpoint, get, now = Date.now }) {
-  const wallSlot = Math.floor((now() / 1000 - net.genesisTime) / SECONDS_PER_SLOT);
+  // Read afresh at each check: following a fortnight of committees can take longer than a slot.
+  const wall = () => Math.floor((now() / 1000 - net.genesisTime) / SECONDS_PER_SLOT);
+  const wallSlot = wall();
   const root = bytes(checkpoint, 32, 'the shipped block root');
 
   const boot = (await get(`/eth/v1/beacon/light_client/bootstrap/${checkpoint}`))?.data || refuse('the bootstrap reply is empty');
@@ -313,17 +317,28 @@ async function sync({ net, checkpoint, get, now = Date.now }) {
   }
 
   const raw = (await get('/eth/v1/beacon/light_client/finality_update'))?.data || refuse('the finality update is empty');
-  const committee = committees.get(periodAt(uint(raw.signature_slot, 'signature slot'))) || refuse('the finality update is signed in a period this client has no committee for');
+  const signedIn = periodAt(uint(raw.signature_slot, 'signature slot'));
+  // A period can begin while this runs: one more hand-over, and only one, is followed to reach it.
+  if (signedIn === period + 1 && periodAt(wall() + 1) === signedIn) {
+    const list = await get(`/eth/v1/beacon/light_client/updates?start_period=${period}&count=1`);
+    const item = (Array.isArray(list) && list.length === 1 && list[0]?.data) || refuse(`no sync committee update for period ${period}`);
+    const step = validate_light_client_update(net, committees.get(period), item, { nextSyncCommittee: true });
+    if (periodAt(step.attested.beacon.slot) !== period) refuse(`asked for period ${period}, got an update from another`);
+    committees.set(++period, step.nextSyncCommittee);
+  }
+  const committee = committees.get(signedIn) || refuse('the finality update is signed in a period this client has no committee for');
   const u = validate_light_client_update(net, committee, raw, { finalized: true });
-  if (u.signatureSlot > wallSlot + 1) refuse('the finality update is signed in the future by this device\'s clock');
+  if (u.signatureSlot > wall() + 1) refuse('the finality update is signed in the future by this device\'s clock');
   // Just after finality moves on, a server may still offer the finalized block before the shipped one. The
   // shipped block is the starting point all of this rests on, so it is the newest finalized block known.
   const shipped = u.finalized.beacon.slot < checkpointSlot;
   const finalizedSlot = shipped ? checkpointSlot : u.finalized.beacon.slot;
-  if (wallSlot - finalizedSlot > MAX_FINALIZED_AGE_SLOTS) throw new LightError('old', `the newest finalized block offered is ${wallSlot - finalizedSlot} slots old`);
+  if (wall() - finalizedSlot > MAX_FINALIZED_AGE_SLOTS) throw new LightError('old', `the newest finalized block offered is ${wall() - finalizedSlot} slots old`);
+  // `shipped` tells the caller that the block is the starting block itself: the signatures counted in
+  // `participants` are over a header that names an older block, and vouch only for the committee still signing.
   return {
     executionBlockHash: toHex(shipped ? shippedBlockHash : u.executionBlockHash), finalizedSlot, attestedSlot: u.attested.beacon.slot,
-    signatureSlot: u.signatureSlot, participants: u.participants, periods: target - periodAt(checkpointSlot), checkpointSlot,
+    signatureSlot: u.signatureSlot, participants: u.participants, periods: period - periodAt(checkpointSlot), checkpointSlot, shipped,
   };
 }
 

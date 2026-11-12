@@ -25,6 +25,7 @@ const LIES = [
   ['participation: under two thirds, with a signature nobody checked', 'any', (r) => { r[FIN].data.sync_aggregate.sync_committee_bits = '0x' + 'ff'.repeat(40) + '00'.repeat(24); }],
   ['signed header: state root changed', 'any', (r) => { const b = r[FIN].data.attested_header.beacon; b.state_root = flip(b.state_root); }],
   ['signed header: slot changed', 'any', (r) => { const b = r[FIN].data.attested_header.beacon; b.slot = String(Number(b.slot) - 1); }],
+  ['signed header: a slot too large to be a number (two such strings would read alike)', 'any', (r) => { r[FIN].data.attested_header.beacon.proposer_index = '9007199254740993'; }],
   ['signature slot: not after the signed header', 'any', (r) => { r[FIN].data.signature_slot = r[FIN].data.attested_header.beacon.slot; }],
   ['signature slot: moved into the next fork version or period', 'any', (r) => { r[FIN].data.signature_slot = String(Number(r[FIN].data.signature_slot) + 8192); }],
   ['finalized header: state root changed', 'any', (r) => { const b = r[FIN].data.finalized_header.beacon; b.state_root = flip(b.state_root); }],
@@ -37,6 +38,8 @@ const LIES = [
   ['execution block hash changed (payload form)', 'payload', (r) => { const e = r[FIN].data.finalized_header.execution; e.block_hash = flip(e.block_hash); }],
   ['execution state root changed (payload form)', 'payload', (r) => { const e = r[FIN].data.finalized_header.execution; e.state_root = flip(e.state_root); }],
   ['execution block number changed (payload form)', 'payload', (r) => { const e = r[FIN].data.finalized_header.execution; e.block_number = String(Number(e.block_number) + 1); }],
+  ['execution base fee with 2^256 added, which a 256-bit field would hold as the same value (payload form)', 'payload', (r) => { const e = r[FIN].data.finalized_header.execution; e.base_fee_per_gas = (BigInt(e.base_fee_per_gas) + (1n << 256n)).toString(); }],
+  ['execution base fee with a leading zero (payload form)', 'payload', (r) => { const e = r[FIN].data.finalized_header.execution; e.base_fee_per_gas = '0' + e.base_fee_per_gas; }],
   ['execution extra data lengthened (payload form)', 'payload', (r) => { r[FIN].data.finalized_header.execution.extra_data += '00'; }],
   ['bootstrap: another block', 'any', (r, c, k) => { const b = r[k.boot].data.header.beacon; b.proposer_index = String(Number(b.proposer_index) + 1); }],
   ['bootstrap: one committee key changed', 'any', (r, c, k) => { const p = r[k.boot].data.current_sync_committee.pubkeys; p[7] = flip(p[7], 30); }],
@@ -70,7 +73,8 @@ for (const file of (await readdir(dir)).filter((f) => f.endsWith('.json')).sort(
   // As recorded.
   try {
     const got = await run(fx, fx.replies, { now: fx.now, network: fx.network });
-    const same = JSON.stringify(got) === JSON.stringify(fx.expect);
+    // Every field the recording holds must come back the same; the client may return more than it did then.
+    const same = Object.keys(fx.expect).every((k) => got[k] === fx.expect[k]) && got.shipped === false;
     console.log(`${same ? 'ok  ' : 'FAIL'} ${file}: as recorded, finalized slot ${got.finalizedSlot}, ${got.executionBlockHash}`);
     if (!same) failed++;
   } catch (e) { console.log(`FAIL ${file}: as recorded, but refused: ${e.message}`); failed++; }

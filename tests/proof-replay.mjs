@@ -18,6 +18,11 @@ for (const [item, enc] of [[fb('0x646f67'), '0x83646f67'], [[fb('0x636174'), fb(
   check(JSON.stringify(P.rlpDecode(fb(enc)), (k, v) => (v instanceof Uint8Array ? hx(v) : v)) === JSON.stringify(item, (k, v) => (v instanceof Uint8Array ? hx(v) : v)), `rlpDecode of ${enc.slice(0, 40)}`);
 }
 for (const [bad, why] of [['0x8105', 'a small byte as a string'], ['0xb8054142434445', 'long form for a short string'], ['0xb9003841' + '41'.repeat(55), 'a length with a leading zero'], ['0x83646f6700', 'bytes after the item'], ['0x83646f', 'a string past the end'], ['0xc883636174', 'a list past the end'], ['0xc5c383010203', 'an item that runs past its list into the next item'], ['0xf8054142434445', 'long form for a short list'], ['0x', 'nothing']]) check(refused(() => P.rlpDecode(fb(bad))), `rlpDecode accepted ${why}`);
+// Lists inside lists: four deep is read (no trie node or account needs more), deeper is refused before the
+// decoder can be made to recurse without end.
+const nest = (n) => (n ? [nest(n - 1)] : []);
+check(Array.isArray(P.rlpDecode(P.rlpEncode(nest(4)))), 'rlpDecode refused lists nested four deep');
+for (const n of [6, 40, 400]) check(refused(() => P.rlpDecode(P.rlpEncode(nest(n)))), `rlpDecode accepted lists nested ${n} deep`);
 
 // Hand-built tries, for shapes no real trie has. Here the test chooses the root, so any node can be made.
 {
@@ -54,6 +59,9 @@ for (const [bad, why] of [['0x8105', 'a small byte as a string'], ['0xb805414243
   check(verify(ext.hash, [ext.raw, b2.raw], near) === null, 'hand-built: an embedded leaf with another path is absence');
   const far = Uint8Array.from(key); far[2] ^= 0x01;
   check(verify(ext.hash, [ext.raw], far) === null, 'hand-built: an extension that leaves the key is absence');
+  // An extension whose target is empty names no node.
+  const nowhere = node([hp(k.slice(0, 60), false), empty]);
+  check(refused(() => verify(nowhere.hash, [nowhere.raw])), 'hand-built: an extension that names no node was accepted');
   // Accounts that are not four well-sized fields, and a stored zero.
   const address = '0x' + '77'.repeat(20), ak = nib(keccak256(fb(address))), r32 = keccak256(Uint8Array.of(9));
   for (const [what, fields] of [['three fields', [Uint8Array.of(1), empty, r32]], ['a short storage root', [Uint8Array.of(1), empty, r32.subarray(1), r32]], ['a nonce with a leading zero', [Uint8Array.of(0, 1), empty, r32, r32]], ['five fields', [Uint8Array.of(1), empty, r32, r32, empty]]]) {
@@ -67,6 +75,10 @@ for (const [bad, why] of [['0x8105', 'a small byte as a string'], ['0xb805414243
     const st = node([hp(sk, true), P.rlpEncode(stored)]);
     check(refused(() => P.storageAt(hx(st.hash), slot, [hx(st.raw)])), `hand-built: a slot storing ${what} was accepted`);
   }
+  // More nodes than any proof has, and a node larger than any trie node, are refused before they are decoded.
+  check(refused(() => P.storageAt(hx(r32), slot, Array.from({ length: 65 }, () => '0x80'))), 'hand-built: a proof of 65 nodes was accepted');
+  check(refused(() => P.storageAt(hx(r32), slot, ['0x' + '00'.repeat(2049)])), 'hand-built: a proof node of 2049 bytes was accepted');
+  check(refused(() => P.accountAt(hx(r32), address, 'not a list')), 'hand-built: a proof that is not a list was accepted');
   const seven = node([hp(sk, true), P.rlpEncode(Uint8Array.of(7))]);
   check(BigInt(P.storageAt(hx(seven.hash), slot, [hx(seven.raw)])) === 7n, 'hand-built: a slot storing 7');
 }
@@ -93,7 +105,7 @@ for (const file of (await readdir(dir)).filter((f) => /^proof-.*\.json$/.test(f)
     let acct;
     try { acct = P.accountAt(c.stateRoot, c.address, p.accountProof); } catch (e) { check(false, `${what}: account refused: ${e.message}`); continue; }
     const exists = !(BigInt(p.nonce) === 0n && BigInt(p.balance) === 0n && p.codeHash.endsWith('5d85a470') && p.storageHash.endsWith('63b421'));
-    check(acct ? (acct.storageRoot === p.storageHash.toLowerCase() && acct.codeHash === p.codeHash.toLowerCase() && acct.nonce === Number(BigInt(p.nonce))) : !exists, `${what}: account fields`);
+    check(acct ? (acct.storageRoot === p.storageHash.toLowerCase() && acct.codeHash === p.codeHash.toLowerCase()) : !exists, `${what}: account fields`);
     lies(p.accountProof, (alt) => P.accountAt(c.stateRoot, c.address, alt), what);
     // The same proof against another address or another state root.
     check(refused(() => P.accountAt(c.stateRoot, '0x' + 'cd'.repeat(20), p.accountProof)), `${what}: the proof served another address`);

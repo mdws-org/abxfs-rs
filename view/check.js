@@ -86,10 +86,12 @@ async function run() {
     const fin = await finalizedBlock({ chainId: chain.id, checkpoint: cp.root, beacons: BEACONS[chain.id] });
     say('working', 'Reading the project\'s root by proof…');
     const proved = await provedTokenParam({ fin, urls: PROOF_ENDPOINTS[chain.id], org: target.org, token: target.token });
-    const atFinalized = proved.known ? await tokenParamAt({ urls: PROOF_ENDPOINTS[chain.id], org: target.org, token: target.token, block: proved.block.number }) : [];
+    const atFinalized = proved.known ? await tokenParamAt({ urls: [...PROOF_ENDPOINTS[chain.id], ...chain.rpcs], org: target.org, token: target.token, blockHash: proved.block.hash }) : [];
     found = { proved, atFinalized };
   } catch (e) {
     fact('Starting block', `slot ${count(cp.slot)}, ${cp.date}`);
+    // An expired starting block is not a passing fault: this copy of the viewer proves nothing until it is updated.
+    if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
     return say('agreed', 'Agreed by the endpoints. Not proved.', `The proof could not be made: ${e.message || e}`);
   }
   const { proved, atFinalized } = found;
@@ -99,14 +101,15 @@ async function run() {
     fact('Root by proof', proved.root, true);
     fact('Proved at', `block ${count(proved.block.number)}, finalized, ${ago(age)} old`);
     fact('Block hash', proved.block.hash, true);
-    fact('Signed by', `${proved.participants} of 512 sync committee members (beacon slot ${count(proved.finalizedSlot)})`);
+    if (proved.shipped) fact('Finality', `this is the viewer's own starting block (beacon slot ${count(proved.finalizedSlot)}); no newer finalized block was offered`);
+    else fact('Signed by', `${proved.participants} of 512 sync committee members, over a header that names beacon slot ${count(proved.finalizedSlot)} as finalized`);
     fact('Proof served by', `${proved.via} (checked here; it is not trusted)`);
     fact('Endpoints at that block', atFinalized.length ? atFinalized.map(([h, r]) => `${h}: ${r === proved.root ? 'the same root' : r}`).join('; ') : 'none answered');
   }
   fact('Starting block', `slot ${count(cp.slot)}, ${cp.date}; trusted for 14 days`);
   const texts = {
-    proved: 'Proved: this is the project\'s root in the newest finalized block, and the endpoints give the same one.',
-    newer: 'Agreed by the endpoints, not yet provable: this version was published in the last few minutes.',
+    proved: 'Proved: this is the project\'s root in a finalized block, the endpoints give the same root at that block, and it is still the current one.',
+    newer: 'Agreed by the endpoints, not yet provable: this version was published after the last finalized block.',
     mismatch: 'The proof and the endpoints disagree. One of them is wrong.',
     agreed: 'Agreed by the endpoints. Not proved.',
   };

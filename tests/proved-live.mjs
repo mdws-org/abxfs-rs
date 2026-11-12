@@ -21,7 +21,7 @@ for (const url of PROOF_ENDPOINTS[1]) {
 }
 const atFinalized = await tokenParamAt({ urls: PROOF_ENDPOINTS[1].slice(0, 5), org, token, block: proved.block.number });
 console.log(`eth_call at block ${proved.block.number}: ${atFinalized.map(([h, r]) => `${h} ${r.slice(0, 12)}…`).join(', ')}`);
-const verdict = judge({ proved, atFinalized, agreedHead: { root: proved.root } });
+const verdict = judge({ proved, atFinalized, agreedHead: { root: proved.root, block: proved.block.number + 90 } });
 console.log(`${verdict.state === 'proved' ? 'ok  ' : 'FAIL'} verdict: ${verdict.state} (${verdict.reason})`);
 if (verdict.state !== 'proved') failed++;
 const none = await provedTokenParam({ fin, urls: PROOF_ENDPOINTS[1], org: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', token });

@@ -90,7 +90,8 @@ function chain({ signers = first(512), periodSigners = first(512), com0 = plain(
   };
   return { replies, checkpoint: hex(boot.root), now: (net.genesisTime + (att.beacon.slot + 3) * 12) * 1000, want: hex((lateBoot ? boot : fin).blockHash) };
 }
-const run = (c, now = c.now) => L.sync({ net, checkpoint: c.checkpoint, now: () => now, get: async (path) => c.replies[path] ?? null });
+// `now` may be a function of how many times the clock has been read, for a period that begins mid-run.
+const run = (c, now = c.now) => { let reads = 0; return L.sync({ net, checkpoint: c.checkpoint, now: () => (typeof now === 'function' ? now(reads++) : now), get: async (path) => c.replies[path] ?? null }); };
 
 // Keys that cancel: member 2k+1 holds the negation of member 2k's secret, so all 512 together sum to nothing.
 const cancelling = () => committee(Array.from({ length: 512 }, (_, i) => (i % 2 ? ORDER - BigInt(9000 + i - 1) : BigInt(9000 + i))));
@@ -107,6 +108,7 @@ const CASES = [
   ['a finality branch padded with a non-zero entry', () => chain({ padFinality: rand32() }), 'check'],
   ['a bootstrap branch padded with a non-zero entry', () => chain({ padBootstrap: rand32() }), 'check'],
   ['the server still offers the finalized block before the shipped one: the shipped block is used', () => chain({ lateBoot: true }), 'accept'],
+  ['a new period begins while the client is running: one more hand-over is followed', () => chain(), 'accept', (c) => (reads) => (reads === 0 ? (net.genesisTime + (4 * P - 2) * 12) * 1000 : c.now)],
   ['the hand-over update is withheld', () => chain({ skipPeriod: true }), 'check'],
   ['the shipped block is more than 14 days old', () => chain(), 'stale', (c) => c.now + 13.6 * 86_400_000],
   ['the newest finalized block is 257 slots old', () => chain(), 'old', (c) => c.now + (257 - 83) * 12_000],

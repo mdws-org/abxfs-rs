@@ -111,12 +111,15 @@ A finalized block is about a quarter of an hour behind the head. The endpoints a
 
 | At the finalized block | At the head | Verdict |
 |---|---|---|
-| The proof and every endpoint that answered give one root | The same root | Proved |
-| The proof and every endpoint that answered give one root | Another root | Published since the finalized block; agreed by the endpoints, not yet provable |
+| At least two endpoints answered, and each gives the proved root | The same root | Proved |
+| At least two endpoints answered, and each gives the proved root | Another root | Published since the finalized block; agreed by the endpoints, not yet provable |
 | An endpoint gives a root that differs from the proof | Any | Mismatch |
+| Fewer than two endpoints answered | Any | Agreed by the endpoints; the proof could not be compared |
 | No proof could be made | Any | Agreed by the endpoints, with the reason |
 
-On a mismatch the project is not shown. One of the two readings is wrong and the viewer cannot tell which, so the page lists both roots, the block, which endpoint gave which root, and a fixed-root address for each version.
+The endpoints are asked at the finalized block by its hash, so an endpoint cannot answer for another block. The proved block must also be within 400 blocks of the block the endpoints are at: the light client decides what is recent by the device's clock, and this is a second reading of the time.
+
+On a mismatch the project is not shown. One of the two readings is wrong and the viewer cannot tell which, so the page lists both roots, the block, which endpoint gave which root, and a fixed-root address for each version. The service worker waits 20 seconds for the proof before it answers a page. If the proof arrives later and does not match, the mismatch stands from then on.
 
 A project's own hostname states no verdict. A project's scripts run there and can rewrite any text the viewer shows, the info page included. The verdict is on the check page, `check.<host>/#<chain id>-<org address>-<token id>`, which has no service worker and which a project's scripts cannot reach. Links to a project must open the check page first.
 
@@ -128,7 +131,7 @@ The proof depends on three things:
 - Fewer than two thirds of each sync committee since that block signing a false header. Committee members are not penalised for doing so. The comparison with the endpoints exists for this case and for a fault in the viewer's own checks.
 - The fork schedule in `site/light.js`. A fork can change the header fields and the Merkle positions. `tools/fork-watch.py` exits 1 when a beacon node reports a fork that `light.js` does not list, and `.github/workflows/watch.yml` runs it every day. A header from an unknown fork fails its checks, and the viewer then shows the endpoints' root with no proof.
 
-The host can switch proving off for every installed viewer by serving `{"proof": false}` at `/_abxfs/switch.json`. Use it if a fault is found in the proof code. The switch cannot turn proving on, and it cannot change a verdict.
+The host can switch proving off for every installed viewer by serving `{"proof": false}` at `/_abxfs/switch.json`. Use it if a fault is found in the proof code. A worker that has read the switch as off keeps proving off for as long as it runs. The switch cannot turn proving on, and it cannot change a verdict.
 
 Base, Arbitrum One and Robinhood Chain have no proof yet. The check page says "Agreed by the endpoints. Not proved." for projects on those chains.
 

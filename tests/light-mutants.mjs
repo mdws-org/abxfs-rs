@@ -11,6 +11,7 @@ const src = await readFile(join(root, 'site/light.js'), 'utf8');
 const MUTANTS = [
   ['the BLS signature check', 'if (!eth_fast_aggregate_verify(committee, bits, signingRoot, signature))', 'if (false)'],
   ['the two-thirds participation rule', 'if (participants * 3 < SYNC_COMMITTEE_SIZE * 2)', 'if (false)'],
+  ['the base fee fitting in 256 bits', "if (base >> 256n) refuse(`${what} base fee does not fit in 256 bits`);", ''],
   ['signature slot after the signed header', 'if (signatureSlot <= attested.beacon.slot)', 'if (false)'],
   ['the finality branch', "if (!is_valid_normalized_merkle_branch(beaconBlockHeaderRoot(finalized.beacon), branchOf(raw.finality_branch, 'finality branch'), form.finalizedRoot, attested.beacon.stateRoot))", 'if (false)'],
   ['the execution payload branch', 'if (!is_valid_normalized_merkle_branch(executionPayloadHeaderRoot(header.execution), header.executionBranch, EXECUTION_PAYLOAD_GINDEX, header.beacon.bodyRoot))', 'if (false)'],
@@ -19,9 +20,9 @@ const MUTANTS = [
   ['the bootstrap committee branch', "if (!is_valid_normalized_merkle_branch(syncCommitteeRoot(first), branchOf(boot.current_sync_committee_branch, 'bootstrap sync committee branch'), bootForm.currentSyncCommittee, header.beacon.stateRoot))", 'if (false)'],
   ['the next committee branch', "if (!is_valid_normalized_merkle_branch(syncCommitteeRoot(next), branchOf(raw.next_sync_committee_branch, 'next sync committee branch'), form.nextSyncCommittee, attested.beacon.stateRoot))", 'if (false)'],
   ['the maximum age of the shipped block', 'if (wallSlot - checkpointSlot > MAX_CHECKPOINT_AGE_SLOTS)', 'if (false)'],
-  ['the maximum age of the finalized block', 'if (wallSlot - finalizedSlot > MAX_FINALIZED_AGE_SLOTS)', 'if (false)'],
+  ['the maximum age of the finalized block', 'if (wall() - finalizedSlot > MAX_FINALIZED_AGE_SLOTS)', 'if (false)'],
   ['the shipped block standing in for an older finalized block', 'const shipped = u.finalized.beacon.slot < checkpointSlot;', 'const shipped = false;'],
-  ['signature not in the future', 'if (u.signatureSlot > wallSlot + 1)', 'if (false)'],
+  ['signature not in the future', 'if (u.signatureSlot > wall() + 1)', 'if (false)'],
   ['extra data length inside the hash', 'hash(extra, uintChunk(e.extraData.length))', 'hash(extra, uintChunk(0))'],
   ['the fork version in the signing domain', "const domain = compute_domain(net, compute_fork_version(net, epochAt(Math.max(signatureSlot, 1) - 1)));", "const domain = compute_domain(net, bytes(net.forks[0][2], 4, 'v'));"],
   ['zero padding of a long branch', 'for (let i = 0; i < extra; i++) if (!equal(branch[i], ZERO)) return false;', ''],
@@ -31,7 +32,8 @@ const MUTANTS = [
 // They are listed so the claim is tested: if a suite ever starts failing here, the guard is no longer redundant.
 const SECOND_GUARDS = [
   // Keys that cancel to nothing need the point at infinity as their signature, and that is refused on its own.
-  ['the infinity check on the aggregate key', 'if (aggregate.is0()) return false;', ''],
+  ['the infinity check on the aggregate key', 'if (aggregate.is0()) return false;', ''],  // A number too large to be exact changes the header's hash, so the signature over it fails as well.
+  ['numbers limited to fifteen digits', "!/^(0|[1-9][0-9]{0,14})$/.test(s)", "!/^(0|[1-9][0-9]*)$/.test(s)"],
 ];
 
 let bad = 0;
@@ -56,5 +58,5 @@ for (const [what, find, put] of SECOND_GUARDS) {
   console.log(`${still ? 'ok  ' : 'FAIL'} without ${what}: ${still ? 'still refused by another check, as expected' : 'a suite now fails; this guard is no longer redundant, move it to MUTANTS'}`);
   if (!still) bad++;
 }
-console.log(bad ? `${bad} problem(s)` : `ok: all ${MUTANTS.length} mutants caught, ${SECOND_GUARDS.length} second guard confirmed`);
+console.log(bad ? `${bad} problem(s)` : `ok: all ${MUTANTS.length} mutants caught, ${SECOND_GUARDS.length} second guards confirmed`);
 process.exit(bad ? 1 : 0);

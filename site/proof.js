@@ -27,8 +27,9 @@ const equal = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 // ---- RLP ----
 // Decodes one item that must fill `u` exactly. A byte string decodes to a Uint8Array, a list to an Array.
+const RLP_DEPTH = 4; // a trie node is a list of strings, or holds one embedded node; an account is a list in a string
 function rlpDecode(u) {
-  const [item, end] = rlpItem(u, 0);
+  const [item, end] = rlpItem(u, 0, 0);
   if (end !== u.length) refuse('RLP: bytes after the item');
   return item;
 }
@@ -41,7 +42,8 @@ function rlpLength(u, at, n) { // a big-endian length of n bytes, with no leadin
   if (len > u.length) refuse('RLP: length runs past the end');
   return len;
 }
-function rlpItem(u, at) {
+function rlpItem(u, at, depth) {
+  if (depth > RLP_DEPTH) refuse('RLP: lists nested too deep');
   if (at >= u.length) refuse('RLP: item starts past the end');
   const b = u[at];
   if (b < 0x80) return [u.subarray(at, at + 1), at + 1];
@@ -56,7 +58,7 @@ function rlpItem(u, at) {
     return [u.subarray(start, end), end];
   }
   const items = [];
-  for (let p = start; p < end;) { const [item, next] = rlpItem(u, p); if (next > end) refuse('RLP: list item runs past its list'); items.push(item); p = next; }
+  for (let p = start; p < end;) { const [item, next] = rlpItem(u, p, depth + 1); if (next > end) refuse('RLP: list item runs past its list'); items.push(item); p = next; }
   return [items, end];
 }
 function rlpEncode(item) {
@@ -85,6 +87,7 @@ function join(parts) {
 // value stored at the key, or null when the proof shows nothing is stored there.
 function verifyProof(root, key, proof, what) {
   if (!Array.isArray(proof) || proof.length > 64) refuse(`${what}: not a proof`);
+  if (proof.some((n) => n.length > 2048)) refuse(`${what}: a proof node is larger than any trie node`);
   const nibbles = [];
   for (const b of key) nibbles.push(b >> 4, b & 15);
   let used = 0, at = 0;
@@ -119,6 +122,8 @@ function verifyProof(root, key, proof, what) {
         if (used !== proof.length) refuse(`${what}: nodes after the proof ended`);
         return target;
       }
+      // An extension leads to a node: by its hash, or holding it. It never leads nowhere.
+      if (!Array.isArray(target) && target.length !== 32) refuse(`${what}: an extension that names no node`);
       child = target;
     } else refuse(`${what}: a node with ${node.length} items`);
 
@@ -137,22 +142,27 @@ function quantityBytes(u, what, max = 32) { // an RLP integer: no leading zero, 
   return u;
 }
 
-// An account at a state root. Returns { storageRoot, codeHash, nonce } as hex and a number, or null if the proof
+// An account at a state root. Returns { storageRoot, codeHash } as hex, or null if the proof
 // shows the account does not exist.
+const MAX_NODES = 64;
+const nodesOf = (list, what) => {
+  if (!Array.isArray(list) || list.length > MAX_NODES) refuse(`${what} is not a proof`);
+  return list.map((n) => (typeof n === 'string' && n.length <= 2 + 2 * 2048 ? bytes(n, `${what} node`) : refuse(`${what}: a node is larger than any trie node`)));
+};
 function accountAt(stateRoot, address, accountProof) {
-  const leaf = verifyProof(bytes(stateRoot, 'state root', 32), keccak256(bytes(address, 'address', 20)), accountProof.map((n) => bytes(n, 'account proof node')), 'account proof');
+  const leaf = verifyProof(bytes(stateRoot, 'state root', 32), keccak256(bytes(address, 'address', 20)), nodesOf(accountProof, 'account proof'), 'account proof');
   if (leaf === null) return null;
   const fields = rlpDecode(leaf);
   if (!Array.isArray(fields) || fields.length !== 4 || fields[2].length !== 32 || fields[3].length !== 32) refuse('the account is not four fields');
   quantityBytes(fields[0], 'the account nonce', 8);
   quantityBytes(fields[1], 'the account balance');
-  return { storageRoot: toHex(fields[2]), codeHash: toHex(fields[3]), nonce: fields[0].reduce((n, b) => n * 256 + b, 0) };
+  return { storageRoot: toHex(fields[2]), codeHash: toHex(fields[3]) };
 }
 
 // One storage word at a storage root, as 32 bytes of hex. A slot nothing was written to is zero.
 function storageAt(storageRoot, slot, storageProof) {
   const root = bytes(storageRoot, 'storage root', 32);
-  const nodes = storageProof.map((n) => bytes(n, 'storage proof node'));
+  const nodes = nodesOf(storageProof, 'storage proof');
   if (toHex(root) === EMPTY_TRIE) { if (nodes.length) refuse('a proof was given for an empty storage'); return '0x' + '0'.repeat(64); }
   const leaf = verifyProof(root, keccak256(bytes(slot, 'slot', 32)), nodes, 'storage proof');
   if (leaf === null) return '0x' + '0'.repeat(64);
@@ -186,7 +196,10 @@ function executionHeader(blockHash, block) {
       if (typeof v !== 'string' || !QUANTITY.test(v)) refuse(`the header's ${name} is not a number`);
       const h = v.slice(2);
       fields.push(v === '0x0' ? new Uint8Array(0) : bytes('0x' + (h.length % 2 ? '0' + h : h), name));
-    } else fields.push(bytes(v, `the header's ${name}`, type === 'bytes' ? undefined : type));
+    } else {
+      if (type === 'bytes' && (typeof v !== 'string' || v.length > 2 + 2 * 32)) refuse(`the header's ${name} is longer than 32 bytes`);
+      fields.push(bytes(v, `the header's ${name}`, type === 'bytes' ? undefined : type));
+    }
   }
   const got = toHex(keccak256(rlpEncode(fields)));
   if (got !== blockHash.toLowerCase()) refuse(`the header the endpoint gave hashes to ${got}, not the proved block ${blockHash}`);
