@@ -68,6 +68,7 @@ async function game({ fin, urls, proxy, retirementTimestamp, deps }) {
 // The claims that count, proved at the Ethereum block `fin` names:
 //   anchor  the newest claim that has become final under Base's rules (a game that resolved in the claimant's favour)
 //   latest  the newest claim posted, if a proof was accepted for it and nobody has won a challenge to it; else null
+const NEWEST_SEARCH = 4n; // how far back in the factory's list the newest game of Base's type is looked for
 // `urls` are Ethereum proof endpoints. `deps` lets tests/base-rules.mjs supply a made-up Ethereum state.
 async function baseClaims({ fin, urls, deps = { provedAccount, provedCode } }) {
   const read = (address, slots) => deps.provedAccount({ fin, urls, address, slots });
@@ -94,15 +95,23 @@ async function baseClaims({ fin, urls, deps = { provedAccount, provedCode } }) {
 
   // The newest game in the factory's list. It counts only while unresolved with a proof accepted, or resolved
   // in the claimant's favour.
-  let latest = null;
-  const newest = BigInt((await read(FACTORY, ['0x' + word(BigInt(hash(word(104))) + count - 1n)])).words[0]);
-  if (Number(newest >> 224n) === GAME_TYPE) {
+  // Anyone may add a game of another type to the list, so the newest of this type among the last few is taken.
+  // When that one does not count, `latestWhy` says why.
+  let latest = null, latestWhy = '';
+  for (let back = 1n; back <= NEWEST_SEARCH && back <= count; back++) {
+    const entry = BigInt((await read(FACTORY, ['0x' + word(BigInt(hash(word(104))) + count - back)])).words[0]);
+    if (Number(entry >> 224n) !== GAME_TYPE) { latestWhy = `none of the newest ${back} games in the factory's list is of the type Base uses`; continue; }
+    latestWhy = '';
     try {
-      const g = await game({ fin, urls, proxy: addressOf(word(newest)), retirementTimestamp, deps });
-      if (g.status !== STATUS.challengerWins && g.proofCount >= 1 && g.l2Block >= anchor.l2Block) latest = g;
-    } catch (e) { if (e.kind !== 'check') throw e; }
+      const g = await game({ fin, urls, proxy: addressOf(word(entry)), retirementTimestamp, deps });
+      if (g.status === STATUS.challengerWins) latestWhy = 'the newest game was resolved against its claim';
+      else if (g.proofCount < 1) latestWhy = 'the newest game has no proof accepted';
+      else if (g.l2Block < anchor.l2Block) latestWhy = 'the newest game is for a block before the final one';
+      else latest = g;
+    } catch (e) { if (e.kind !== 'check') throw e; latestWhy = `the newest game was refused: ${e.message}`; }
+    break;
   }
-  return { l1Block: portal.block, anchor, latest };
+  return { l1Block: portal.block, anchor, latest, latestWhy };
 }
 
 // A token parameter on Base at the L2 block a claim names. The claim is an output root:

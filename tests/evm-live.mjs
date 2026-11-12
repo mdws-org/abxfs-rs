@@ -2,7 +2,7 @@
 // client's finalized block must equal, byte for byte, what an endpoint's own eth_call returns at that block.
 // usage: node tests/evm-live.mjs [filter]
 import { BEACONS, CHECKPOINTS } from '../site/checkpoint.js';
-import { PROOF_ENDPOINTS, call, finalizedBlock } from '../site/proved.js';
+import { CALL_GAS, PROOF_ENDPOINTS, call, finalizedBlock } from '../site/proved.js';
 import { executionHeader } from '../site/proof.js';
 import { provedCall } from '../site/evm-state.js';
 import { GENERATORS } from '../site/token.js';
@@ -32,10 +32,10 @@ for (const [name, to, data] of CASES) {
   let ours;
   try { ours = await provedCall({ chainId: 1, header, urls, to, data }); } catch (e) { bad++; console.log(`FAIL ${name}: ${e.kind || ''} ${e.message}`); continue; }
   let theirs = null;
-  for (const url of urls) { try { theirs = await call(url, 'eth_call', [{ to, data }, { blockHash: fin.executionBlockHash }], 30_000, 12_000_000); break; } catch { /* next */ } }
+  for (const url of urls) { try { theirs = await call(url, 'eth_call', [{ to, data, gas: '0x' + CALL_GAS.toString(16) }, { blockHash: fin.executionBlockHash }], 30_000, 12_000_000); break; } catch { /* next */ } }
   const hex = '0x' + Buffer.from(ours.output).toString('hex');
   const same = ours.success && theirs !== null && hex === theirs.toLowerCase();
   bad += !same;
-  console.log(`${same ? 'ok  ' : 'FAIL'} ${name}: ${ours.output.length} bytes ${same ? 'equal to eth_call' : ours.success ? 'DIFFERENT from eth_call' : 'reverted here'}; ${ours.stats.accounts} accounts, ${ours.stats.words} storage words, ${Math.round(ours.stats.codeBytes / 1024)} KB of code, ${ours.stats.requests} requests via ${ours.via}; ${Date.now() - t} ms`);
+  console.log(`${same ? 'ok  ' : 'FAIL'} ${name}: ${ours.output.length} bytes ${same ? 'equal to eth_call' : ours.success ? 'DIFFERENT from eth_call' : 'reverted here'}; ${ours.gasUsed} gas, ${ours.stats.accounts} accounts, ${ours.stats.words} storage words, ${Math.round(ours.stats.codeBytes / 1024)} KB of code, ${ours.stats.requests} requests via ${ours.via}; ${Date.now() - t} ms`);
 }
 process.exit(bad ? 1 : 0);

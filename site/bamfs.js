@@ -186,9 +186,9 @@ async function walk(ctx, root) {
 }
 
 // FastLZ level 1, to the end of the stream.
-function inflate(d) {
+function inflate(d, limit = MAX_FILE_BYTES) {
   let out = new Uint8Array(Math.max(1024, d.length * 4)), o = 0;
-  const room = (n) => { if (o + n > MAX_FILE_BYTES) throw new LookupError('toolarge', `it inflates to more than ${MAX_FILE_BYTES / 1048576} MiB`); if (o + n > out.length) { const bigger = new Uint8Array(Math.max(out.length * 2, o + n)); bigger.set(out.subarray(0, o)); out = bigger; } };
+  const room = (n) => { if (o + n > limit) throw new LookupError('toolarge', `it inflates to more than ${MAX_FILE_BYTES / 1048576} MiB`); if (o + n > out.length) { const bigger = new Uint8Array(Math.max(out.length * 2, o + n)); bigger.set(out.subarray(0, o)); out = bigger; } };
   for (let i = 0; i < d.length;) {
     const c = d[i], t = c >> 5;
     if (t === 0) {
@@ -207,7 +207,7 @@ function inflate(d) {
   }
   return out.subarray(0, o);
 }
-async function gunzip(stored) {
+async function gunzip(stored, limit = MAX_FILE_BYTES) {
   const parts = [];
   let n = 0;
   try {
@@ -215,13 +215,25 @@ async function gunzip(stored) {
       const { done, value } = await rd.read();
       if (done) break;
       n += value.length;
-      if (n > MAX_FILE_BYTES) { rd.cancel().catch(() => {}); throw new LookupError('toolarge', `it decodes to more than ${MAX_FILE_BYTES / 1048576} MiB`); }
+      if (n > limit) { rd.cancel().catch(() => {}); throw new LookupError('toolarge', `it decodes to more than ${MAX_FILE_BYTES / 1048576} MiB`); }
       parts.push(value);
     }
   } catch (e) { if (e instanceof LookupError) throw e; refuse('the stored bytes are not a valid gzip stream'); }
   return concat(...parts);
 }
-const decode = (algorithm, bytes) => (algorithm === 6 ? inflate(bytes) : algorithm === 1 ? gunzip(bytes) : (() => { throw new LookupError('unsupported', `this viewer cannot decode BAMFS compression ${algorithm}`); })());
+const decode = (algorithm, bytes, limit) => (algorithm === 6 ? inflate(bytes, limit) : algorithm === 1 ? gunzip(bytes, limit) : (() => { throw new LookupError('unsupported', `this viewer cannot decode BAMFS compression ${algorithm}`); })());
+
+// Chunks that are each a stream of their own: decoded one after another, and together no more than `limit` bytes.
+async function decodeEach(algorithm, stored, limit) {
+  const parts = [];
+  let decoded = 0;
+  for (const s of stored) {
+    const part = await decode(algorithm, s, limit - decoded);
+    decoded += part.length;
+    parts.push(part);
+  }
+  return concat(...parts);
+}
 
 // A file's bytes, each chunk checked against its hash and the whole against the file's output hash.
 async function readFile(ctx, cid, info) {
@@ -245,10 +257,11 @@ async function readFile(ctx, cid, info) {
     if (info.outputHash !== ZERO) refuse(`file ${cid} is not compressed but records an output hash`);
     body = concat(...stored);
   } else {
-    body = info.compression & 0x80 ? concat(...await Promise.all(stored.map((s) => decode(algorithm, s)))) : await decode(algorithm, concat(...stored));
+    body = info.compression & 0x80 ? await decodeEach(algorithm, stored, MAX_FILE_BYTES) : await decode(algorithm, concat(...stored), MAX_FILE_BYTES);
     if (H(body) !== info.outputHash) refuse(`file ${cid}: its decoded bytes do not hash to its output hash`);
   }
+  if (info.generation === 2 && body.length !== info.size) refuse(`file ${cid} is ${body.length} bytes, its record says ${info.size}`);
   return body;
 }
 
-export { STORES, inflate, readFile, walk };
+export { STORES, decodeEach, inflate, readFile, walk };

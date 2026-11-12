@@ -140,7 +140,7 @@ Base's state reaches Ethereum as claims. Every 6,000 Base blocks a claim about B
 `site/base.js` reads the claims by proof at the finalized Ethereum block of the section above:
 
 1. OptimismPortal2, AnchorStateRegistry and DisputeGameFactory are upgradeable. Each one's implementation address is proved and must be the one whose storage layout was read from verified source. After an upgrade nothing is claimed until `base.js` is brought up to date.
-2. The registry gives the anchor game (the newest claim that has become final), the respected game type, and the time before which games are retired. The factory gives the newest game.
+2. The registry gives the anchor game (the newest claim that has become final), the respected game type, and the time before which games are retired. The factory gives the newest game. Anyone may add a game of another type to the factory's list, so the newest game of Base's type among the last four entries is taken, and the check page says why when it does not count.
 3. A game is a 98-byte clone of the AggregateVerifier implementation with its claim in its code. The game's code hash is proved, the code an endpoint gives must hash to it, and the claim and the Base block number are read from it. The factory's record of the game is proved, as are its status, that it is not blacklisted, and that it is not retired.
 4. A claim is an output root: `keccak(0 . state root . message passer storage root . block hash)`. The Base block's header, re-hashed, and the message passer's account proof must give the claimed output root. The project's root is then read by storage proof at that Base block, as on Ethereum.
 
@@ -166,13 +166,34 @@ The root of a BAMFS project is proved and compared like any other, with `bamfs.c
 
 ### Token pages
 
-Many ABX contracts keep their artwork in `tokenURI` and have no ABX FS root: image tokens, and code projects whose page the contract assembles from stored script. For those the viewer serves the token's own page at the same hostname (`site/token.js`). `tokenURI` (or `uri` on an ERC-1155 contract) is asked of every endpoint at one block. At least two must answer, and all that answer must return the same bytes. The reply must be a `data:` URI holding JSON. Its `animation_url`, when it is an HTML `data:` URI, is the page; otherwise its `image`, when it is an image `data:` URI, is. The page is exactly those bytes.
+Many ABX contracts keep their artwork in `tokenURI` and have no ABX FS root: image tokens, and code projects whose page the contract assembles from stored script. For those the viewer serves the token's own page at the same hostname (`site/token.js`). `tokenURI` (or `uri` on an ERC-1155 contract) is asked of every endpoint at one block, each host name once. At least two must answer, and all that answer must return the same bytes. An empty reply counts as an answer. The reply must be a `data:` URI holding JSON. Its `animation_url`, when it is an HTML `data:` URI, is the page; otherwise its `image`, when it is an image `data:` URI, is. The page is exactly those bytes.
 
 A code project whose `tokenURI` points at a resolver still has its page on chain. ABX's generator contract (one per chain, `GENERATORS` in `site/token.js`) builds the page from the script the collection stores, the libraries it names and the token's data. When `tokenURI` holds no page, the viewer asks the generator for `onChainStatus(collection)` and `document(collection, token)` under the same agreement rule and serves that document. A document of a megabyte is more than some endpoints compute in one call, so the proof endpoints are asked as well when fewer than two of the usual ones answer. The check page says when the document loads a library the chain does not hold.
 
 When the metadata, the art it names, or a project's code is at an address off the chain, the viewer says where and shows nothing. It does not fetch it.
 
-A `tokenURI` reply is computed by the contract, so no storage proof covers it. The check page says "Agreed by the endpoints. Not proved." for a token page on every chain.
+A `tokenURI` reply is computed by the contract, so no storage proof covers it. On Base, Arbitrum One and Robinhood Chain the check page says "Agreed by the endpoints. Not proved." for a token page.
+
+### Token pages on Ethereum: the call is run here
+
+On Ethereum and Sepolia the check page runs the contract's call itself. `site/evm.js` is an EVM for view calls, and `site/evm-state.js` gives it state at the finalized block the light client reached: every account, storage word and contract code the call asks for is fetched with a Merkle proof and checked against that block's state root. The endpoints are then asked for the same call at that block, by block hash.
+
+| Check page | What it means |
+| --- | --- |
+| Recomputed here from proved state, and the endpoints give the same | The reply computed here, the reply of at least two endpoints at the finalized block, and the reply the page is made from are the same bytes |
+| Agreed, not yet provable | The reply has changed since the finalized block |
+| Warning: this viewer and an endpoint compute different pages | An endpoint returns another reply at the finalized block, or returns one where the call fails here. The page stays open; either the endpoint or this EVM is wrong |
+| Agreed by the endpoints. Not proved | The EVM does not run something the call uses, fewer than two endpoints answered at that block, the state could not be read, or the finalized block is more than 400 blocks from the endpoints' |
+
+The EVM runs a fixed list of opcodes and stops at anything else: a write to storage or transient storage, a log, contract creation, a call that sends value, `SELFDESTRUCT`, `CALLCODE`, `BLOCKHASH`, `BLOBBASEFEE`, an account that delegates its code (EIP-7702), and every precompile but SHA-256 and identity. A call that stops is reported as not run. It never produces a reply. Gas is charged as the Osaka rules charge it, so a call given too little gas fails here as it does on chain. A node left to choose gives a call its own gas limit (25, 50, 500 and 550 million were seen on public endpoints), and a contract can read what it has left. So every `eth_call` this viewer compares names 500,000,000 gas (`CALL_GAS` in `site/proved.js`), and the EVM starts with the same amount less what a node takes before the code runs: 21,000, and 4 or 16 for each zero or other byte of call data. An endpoint with a lower limit runs the call with less. `BASEFEE` reads zero and the caller is the zero address, as on a node for a call that names neither a gas price nor a sender. `tests/evm-context-live.mjs` checks 18 such values against the live endpoints.
+
+An endpoint is asked which accounts and storage words the call touches (`eth_createAccessList`) so they can be fetched together. That answer only decides what is fetched early. A word it leaves out is fetched and proved when the EVM asks for it. A 1 MB generator document reads 71 accounts and about 1 MB of contract code and takes about 20 seconds. Most tokens take 2 to 4.
+
+A generator document is shown because of two other replies: the generator's status for the collection, and a `tokenURI` that holds no page. Both calls are run here as well, and "recomputed" is said only when they give what the endpoints gave. When the document loads a library from an address off the chain, the check page says that nothing covers what that address serves.
+
+A run stops after 60 seconds of computing or 120 seconds of fetching, and at 600 requests. What a hint asks for may use half of those requests and 4,000 storage words.
+
+The viewer's own pages (the service worker) still serve the reply the endpoints agree on. Only the check page says whether that reply was also recomputed.
 
 ### Arbitrum One and Robinhood Chain
 
@@ -215,6 +236,7 @@ node tests/light-mutants.mjs    # light.js with one check removed at a time; eac
 node tests/proof-replay.mjs     # recorded proofs from four chains, RLP cases, hand-built tries
 node tests/proof-mutants.mjs    # proof.js with one check removed at a time
 node tests/verdict.mjs          # the verdict table
+node tests/verdict-mutants.mjs  # the rule for computed pages with one condition removed at a time
 node tests/token.mjs            # reading a tokenURI reply, and the agreement rule against made-up endpoints
 node tests/bamfs-replay.mjs     # recorded reads of both BAMFS generations, then altered and targeted lies; FastLZ cases
 node tests/bamfs-mutants.mjs    # bamfs.js with one check removed at a time
@@ -229,6 +251,10 @@ node tests/proved-live.mjs                   # live: a project's root by proof t
 node tests/base-live.mjs                     # live: Base's anchor and newest claims, and a project's root at each
 node tests/arbitrum-live.mjs                 # live: the confirmed assertion of Arbitrum One and Robinhood Chain
 node tests/token-page.mjs                    # live: token pages in a browser equal an independent read of tokenURI
+node tests/evm-context-live.mjs              # live: gas left, base fee, caller and 15 more values, the same here and on the endpoints
+node tests/evm-live.mjs                      # live: 8 real calls run here over proved state equal eth_call at the finalized block
+EVM_DIR=<dir> node tests/evm-fuzz.mjs 3000   # generated programs here and in @ethereumjs/evm: the same outcome, output and gas
+EVM_DIR=<dir> node tests/evm-mutants.mjs     # evm.js with one rule or cost changed at a time; each must fail the comparison
 node tests/bamfs-live.mjs [dir]              # live: every file of four BAMFS projects, checked to the root; writes them to dir
 node tests/check-page.mjs                    # live: the check page in a browser (needs tools/view-serve.py running)
 LODESTAR_DIR=<dir> node tests/light-lodestar.mjs   # the same recordings and lies given to Lodestar's light client

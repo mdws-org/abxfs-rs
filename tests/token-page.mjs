@@ -1,6 +1,7 @@
 // Token pages in a browser, against live chains: the page the viewer serves for a contract with no ABX FS root
 // must be exactly what the contract's tokenURI holds, as read here from another endpoint; and the check page
-// must say it is agreed, not proved.
+// must say what stands behind it: on Ethereum, that the page was recomputed here from proved state and the
+// endpoints give the same; on a chain with no light client, that it is agreed and not proved.
 // usage: tools/build-view.py && tools/view-serve.py &   then   CHROME_PATH=... node tests/token-page.mjs
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
@@ -56,7 +57,7 @@ for (const [name, chain, org, token, want] of CASES) {
   const other = await page.evaluate(async () => (await fetch('/anything-else', { cache: 'no-store' })).status);
   const check = await ctx.newPage();
   await check.goto(`http://check.localhost:${port}/#${label}`);
-  await check.waitForFunction(() => { const v = document.querySelector('#verdict'); return v && v.dataset.state !== 'working'; }, null, { timeout: 90_000 }).catch(() => {});
+  await check.waitForFunction(() => { const v = document.querySelector('#verdict'); return v && v.dataset.state !== 'working'; }, null, { timeout: 240_000 }).catch(() => {});
   const verdict = await check.evaluate(() => ({ state: document.querySelector('#verdict').dataset.state, text: document.querySelector('#verdict').textContent }));
   let ok, detail;
   if (want === 'offchain') {
@@ -64,8 +65,8 @@ for (const [name, chain, org, token, want] of CASES) {
     detail = `served ${got.status}; check page: ${verdict.state} "${verdict.text}"`;
   } else {
     const same = ref.kind === 'page' && sha(Buffer.from(got.bytes)) === sha(Buffer.from(ref.bytes));
-    ok = same && got.status === 200 && (got.type || '').startsWith(want === 'generator' ? 'text/html' : want) && other === 404 && verdict.state === 'agreed' && Boolean(got.agreed);
-    detail = `${got.bytes.length} bytes as ${got.type}, ${same ? 'equal to the reference' : 'DIFFERENT from the reference'}; another path ${other}; check page: ${verdict.state}; agreed by ${got.agreed}`;
+    ok = same && got.status === 200 && (got.type || '').startsWith(want === 'generator' ? 'text/html' : want) && other === 404 && verdict.state === (chain === 1 ? 'proved' : 'agreed') && Boolean(got.agreed);
+    detail = `${got.bytes.length} bytes as ${got.type}, ${same ? 'equal to the reference' : 'DIFFERENT from the reference'}; another path ${other}; check page: ${verdict.state} "${verdict.text}"; agreed by ${got.agreed}`;
   }
   bad += !ok;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${detail}`);

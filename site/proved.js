@@ -210,4 +210,9 @@ async function tokenParamAt({ urls, org, token, block, blockHash, key = KEY_CID 
   return all.filter((a) => a.status === 'fulfilled').map((a) => a.value);
 }
 
-export { COLLECTION_CODE_HASH, KEY_CID, PROOF_ENDPOINTS, ProvedError, call, collectionParamAt, finalizedBlock, paramSlots, provedAccount, provedCode, provedTokenParam, tokenParamAt };
+// The gas named in every eth_call whose reply is compared with another's or with this viewer's own EVM. A node
+// left to choose gives its own limit (25, 50, 500 and 550 million were seen), and a contract can read what it has.
+// A node whose limit is lower runs the call with less.
+const CALL_GAS = 500_000_000n;
+
+export { CALL_GAS, COLLECTION_CODE_HASH, KEY_CID, PROOF_ENDPOINTS, ProvedError, call, collectionParamAt, finalizedBlock, headerOf, paramSlots, provedAccount, provedCode, provedTokenParam, tokenParamAt };

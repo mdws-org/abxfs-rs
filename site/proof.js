@@ -156,7 +156,7 @@ function accountAt(stateRoot, address, accountProof) {
   if (!Array.isArray(fields) || fields.length !== 4 || fields[2].length !== 32 || fields[3].length !== 32) refuse('the account is not four fields');
   quantityBytes(fields[0], 'the account nonce', 8);
   quantityBytes(fields[1], 'the account balance');
-  return { storageRoot: toHex(fields[2]), codeHash: toHex(fields[3]), balance: '0x' + (toHex(fields[1]).slice(2) || '0') };
+  return { storageRoot: toHex(fields[2]), codeHash: toHex(fields[3]), balance: '0x' + (toHex(fields[1]).slice(2) || '0'), nonce: '0x' + (toHex(fields[0]).slice(2) || '0') };
 }
 
 // One storage word at a storage root, as 32 bytes of hex. A slot nothing was written to is zero.

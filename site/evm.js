@@ -5,11 +5,11 @@
 // state write, a contract creation, a log, or a precompile it does not have stops the run with EvmError
 // 'unsupported'. Nothing is guessed. The caller then says "not proved" and never shows a result from here.
 //
-// Gas is not metered as a node meters it. A node's eth_call runs with a gas limit of its own choosing, so no two
-// agree on GAS anyway. Here GAS answers a large constant that shrinks with each call, a call forwards what the
-// 63/64 rule allows of what it asked for, and a call given no gas at all fails as it would on chain. A contract
-// whose result depends on how much gas is left gives another result than a node does, and the caller's
-// comparison with the endpoints' result reports that as a difference.
+// Gas is metered as the Osaka rules meter it: each opcode's cost, memory growth, cold and warm access to accounts
+// and storage, and the 63/64 rule for what a call may pass on. A call that runs out fails as it does on chain.
+// How much gas the outermost call starts with is the caller's to say (`gas`): a node left to itself picks its own
+// limit, so the caller names one amount to the nodes and gives this EVM the same, less what a transaction pays
+// before its code runs (callGas).
 
 import { keccak256 } from './keccak-lookup.js';
 import { sha256 } from './vendor/noble/hashes/sha2.js';
@@ -21,7 +21,21 @@ const unsupported = (what) => { throw new EvmError('unsupported', `this viewer's
 
 const M256 = (1n << 256n) - 1n, SIGN = 1n << 255n;
 const signed = (x) => (x & SIGN ? x - (1n << 256n) : x);
-const MAX_STEPS = 400_000_000, MAX_MEMORY = 96 * 1024 * 1024, MAX_DEPTH = 1024, START_GAS = 1n << 40n;
+const MAX_STEPS = 400_000_000, MAX_MEMORY = 96 * 1024 * 1024, MAX_DEPTH = 1024, MAX_MS = 60_000;
+
+// The fixed part of each opcode's cost; -1 marks an opcode with no fixed cost here (handled where it runs).
+const COST = new Int32Array(256).fill(-1);
+for (const [cost, ops] of [
+  [0, [0x00, 0xf3, 0xfd]], [1, [0x5b]],
+  [2, [0x30, 0x32, 0x33, 0x34, 0x36, 0x38, 0x3a, 0x3d, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x48, 0x50, 0x58, 0x59, 0x5a, 0x5f]],
+  [3, [0x01, 0x03, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x35, 0x37, 0x39, 0x3e, 0x49, 0x51, 0x52, 0x53, 0x5e]],
+  [5, [0x02, 0x04, 0x05, 0x06, 0x07, 0x0b, 0x1e, 0x47]], [8, [0x08, 0x09, 0x56]], [10, [0x0a, 0x57]], [30, [0x20]], [100, [0x5c]],
+  [0, [0x31, 0x3b, 0x3c, 0x3f, 0x54, 0xf1, 0xf4, 0xfa]], // the access cost is charged where the address or slot is known
+]) for (const op of ops) COST[op] = cost;
+for (let op = 0x60; op <= 0x9f; op++) COST[op] = 3; // PUSH1..32, DUP1..16, SWAP1..16
+const COLD_ACCOUNT = 2600n, COLD_SLOT = 2100n, WARM = 100n;
+const memoryCost = (bytes) => { const w = BigInt(Math.ceil(bytes / 32)); return 3n * w + (w * w) / 512n; };
+const wordsOf = (length) => BigInt(Math.ceil(length / 32));
 
 const toBig = (u) => { let v = 0n; for (const b of u) v = (v << 8n) | BigInt(b); return v; };
 function toBytes32(v) { const out = new Uint8Array(32); for (let i = 31; i >= 0; i--) { out[i] = Number(v & 0xffn); v >>= 8n; } return out; }
@@ -30,20 +44,28 @@ const addressOf = (v) => '0x' + (v & ((1n << 160n) - 1n)).toString(16).padStart(
 // Memory that grows in 32-byte words, as the EVM's does.
 class Memory {
   constructor() { this.buf = new Uint8Array(4096); this.size = 0; }
+  // What growing to cover [offset, offset + length) costs; 0 when it is already covered.
+  growth(offset, length) {
+    if (length === 0) return 0n;
+    const end = offset + length;
+    if (!Number.isSafeInteger(end) || end > MAX_MEMORY) throw new EvmError('fault', 'out of gas for memory');
+    const words = Math.ceil(end / 32) * 32;
+    return words > this.size ? memoryCost(words) - memoryCost(this.size) : 0n;
+  }
   grow(offset, length) {
     if (length === 0) return;
-    const end = offset + length;
-    if (!Number.isSafeInteger(end) || end > MAX_MEMORY) throw new EvmError('limit', 'the call uses more memory than this viewer allows');
-    const words = Math.ceil(end / 32) * 32;
+    const words = Math.ceil((offset + length) / 32) * 32;
     if (words > this.size) this.size = words;
     if (words > this.buf.length) { const bigger = new Uint8Array(Math.max(this.buf.length * 2, words)); bigger.set(this.buf); this.buf = bigger; }
   }
-  read(offset, length) { this.grow(offset, length); return this.buf.slice(offset, offset + length); }
-  view(offset, length) { this.grow(offset, length); return this.buf.subarray(offset, offset + length); }
-  write(offset, bytes) { this.grow(offset, bytes.length); this.buf.set(bytes, offset); }
+  read(offset, length) { if (!length) return new Uint8Array(0); this.grow(offset, length); return this.buf.slice(offset, offset + length); }
+  view(offset, length) { if (!length) return new Uint8Array(0); this.grow(offset, length); return this.buf.subarray(offset, offset + length); }
+  write(offset, bytes) { if (!bytes.length) return; this.grow(offset, bytes.length); this.buf.set(bytes, offset); }
 }
 // A stack operand used as an offset or a length: one that cannot be a real one is a run out of memory.
-const small = (v) => { if (v > BigInt(MAX_MEMORY)) throw new EvmError('limit', 'the call names more memory than this viewer allows'); return Number(v); };
+// Where a memory range starts. A range of no bytes touches no memory, wherever it is said to start.
+const start = (offset, length) => (length === 0 ? 0 : small(offset));
+const small = (v) => { if (v > BigInt(MAX_MEMORY)) throw new EvmError('fault', 'out of gas for memory'); return Number(v); };
 // Bytes from `source` at `offset` for `length`, zero-filled past its end (CALLDATACOPY, CODECOPY, EXTCODECOPY).
 function padded(source, offset, length) {
   const out = new Uint8Array(length);
@@ -76,45 +98,77 @@ const PRECOMPILES = {
 //            balance(address) -> Promise<BigInt>, codeHash(address) -> Promise<BigInt> }      proved by the caller
 //   call   { to, data, from? }
 // Returns { success, output }. Throws EvmError for anything it will not run.
-async function run({ env, state, call }) {
-  const counter = { steps: 0 };
-  const origin = call.from || '0x' + '00'.repeat(20);
-  return message({ env, state, counter, origin, depth: 0, gas: START_GAS, caller: origin, address: call.to, codeAddress: call.to, data: call.data, isStatic: false });
+async function run({ env, state, call, gas }) {
+  if (typeof gas !== 'bigint' || gas < 0n) throw new EvmError('limit', 'the call was given no gas to run with');
+  const origin = '0x' + '00'.repeat(20); // a call that names no sender comes from the zero address
+  call = { ...call, to: call.to.toLowerCase() };
+  // What has been touched in this call is warm: cheaper to touch again. The sender, the target, the block's
+  // coinbase and the precompiles start warm. `journal` lets a frame that fails forget what it warmed.
+  const warm = { set: new Set([origin, call.to, String(env.coinbase).toLowerCase()]), journal: [] };
+  const counter = { steps: 0, warm, deadline: Date.now() + (env.maxMs ?? MAX_MS) };
+  return message({ env, state, counter, origin, depth: 0, gas, caller: origin, address: call.to, codeAddress: call.to, data: call.data, isStatic: false });
 }
+// The cost of touching an account or a storage slot: more the first time in a call.
+function touch(warm, key, cold) {
+  if (warm.set.has(key)) return WARM;
+  warm.set.add(key); warm.journal.push(key);
+  return cold;
+}
+const isPrecompile = (address) => { const v = BigInt(address); return (v >= 1n && v <= 0x11n) || v === 0x100n; };
 
 async function message(m) {
   if (m.depth > MAX_DEPTH) return { success: false, output: new Uint8Array(0), gasLeft: m.gas };
   const pre = BigInt(m.codeAddress);
-  if (pre >= 1n && pre <= 0xffn) {
+  if (pre === 0x100n) return unsupported('the precompiled contract at address 256 (P256VERIFY)');
+  if (pre >= 1n && pre <= 0x11n) {
     const p = PRECOMPILES[Number(pre)];
-    if (!p) return pre <= 0x11n ? unsupported(`the precompiled contract at address ${pre}`) : { success: true, output: new Uint8Array(0), gasLeft: m.gas };
+    if (!p) return unsupported(`the precompiled contract at address ${pre}`);
     const cost = p.cost(m.data);
     if (m.gas < cost) return { success: false, output: new Uint8Array(0), gasLeft: 0n };
     return { success: true, output: p.run(m.data), gasLeft: m.gas - cost };
   }
+  const asked = Date.now();
   const code = await m.state.code(m.codeAddress);
+  m.counter.deadline += Date.now() - asked; // waiting for state is not running
   if (!code.length) return { success: true, output: new Uint8Array(0), gasLeft: m.gas };
-  // Code with no gas to run it fails at once.
-  if (m.gas <= 0n) return { success: false, output: new Uint8Array(0), gasLeft: 0n };
-  return execute(m, code);
+  if (code.length >= 3 && code[0] === 0xef && code[1] === 0x01 && code[2] === 0x00) return unsupported('an account that delegates its code (EIP-7702)');
+  // A frame that fails forgets what it made warm.
+  const mark = m.counter.warm.journal.length;
+  const result = await execute(m, code);
+  if (!result.success) { const { set, journal } = m.counter.warm; while (journal.length > mark) set.delete(journal.pop()); }
+  return result;
 }
 
 async function execute(m, code) {
   const { env, state, counter } = m;
+  const { warm } = counter;
   const stack = [], memory = new Memory(), dests = jumpdests(code);
   let pc = 0, returndata = new Uint8Array(0), gas = m.gas;
   const self = BigInt(m.address);
   const pop = () => { if (!stack.length) throw new EvmError('fault', 'stack underflow'); return stack.pop(); };
   const push = (v) => { if (stack.length >= 1024) throw new EvmError('fault', 'stack overflow'); stack.push(v); };
   let op = 0;
+  const OUT = new EvmError('fault', 'out of gas');
+  const use = (cost) => { gas -= cost; if (gas < 0n) throw OUT; };
+  // Pay for memory to cover a range, then make it so.
+  // Time spent waiting for state does not count against the time a run is allowed.
+  const wait = async (answer) => { const asked = Date.now(); try { return await answer; } finally { counter.deadline += Date.now() - asked; } };
+  const mem = (offset, length) => { use(memory.growth(offset, length)); memory.grow(offset, length); };
   // `env.onFail`, when given, is told where a frame failed. Tests use it to explain a difference from a node.
   const fail = (why = 'failed') => { if (env.onFail) env.onFail({ address: m.codeAddress, depth: m.depth, pc: pc - 1, op, why }); return { success: false, output: new Uint8Array(0), gasLeft: 0n }; };
 
   for (;;) {
     if (++counter.steps > MAX_STEPS) throw new EvmError('limit', 'the call runs longer than this viewer allows');
+    // About every million steps: stop when the time allowed is over, and let the page it runs in draw and respond.
+    if ((counter.steps & 0xfffff) === 0) {
+      if (Date.now() > counter.deadline) throw new EvmError('limit', 'the call runs longer than this viewer allows');
+      await new Promise((resume) => setTimeout(resume, 0));
+    }
     if (pc >= code.length) return { success: true, output: new Uint8Array(0), gasLeft: gas };
     op = code[pc++];
     try {
+      const fixed = COST[op];
+      if (fixed > 0) { gas -= BigInt(fixed); if (gas < 0n) return fail('out of gas'); }
       if (op >= 0x60 && op <= 0x7f) { // PUSH1..PUSH32
         const n = op - 0x5f;
         let v = 0n;
@@ -134,7 +188,7 @@ async function execute(m, code) {
         case 0x07: { const a = signed(pop()), b = signed(pop()); push(b === 0n ? 0n : (a % b) & M256); break; }
         case 0x08: { const a = pop(), b = pop(), n = pop(); push(n === 0n ? 0n : (a + b) % n); break; }
         case 0x09: { const a = pop(), b = pop(), n = pop(); push(n === 0n ? 0n : (a * b) % n); break; }
-        case 0x0a: { let base = pop(), e = pop(), r = 1n; while (e > 0n) { if (e & 1n) r = (r * base) & M256; base = (base * base) & M256; e >>= 1n; } push(r); break; }
+        case 0x0a: { let base = pop(), e = pop(), r = 1n; use(50n * BigInt(Math.ceil(e.toString(16).length / 2) * (e === 0n ? 0 : 1))); while (e > 0n) { if (e & 1n) r = (r * base) & M256; base = (base * base) & M256; e >>= 1n; } push(r); break; }
         case 0x0b: { const k = pop(), x = pop(); if (k >= 31n) push(x); else { const bit = 8n * k + 7n, mask = (1n << (bit + 1n)) - 1n; push(x & (1n << bit) ? (x | (M256 ^ mask)) : x & mask); } break; }
         case 0x10: { const a = pop(), b = pop(); push(a < b ? 1n : 0n); break; }
         case 0x11: { const a = pop(), b = pop(); push(a > b ? 1n : 0n); break; }
@@ -151,23 +205,23 @@ async function execute(m, code) {
         case 0x1c: { const s = pop(), x = pop(); push(s >= 256n ? 0n : x >> s); break; }
         case 0x1d: { const s = pop(), x = signed(pop()); push((s >= 256n ? (x < 0n ? -1n : 0n) : x >> s) & M256); break; }
         case 0x1e: { const x = pop(); push(x === 0n ? 256n : BigInt(256 - x.toString(2).length)); break; } // CLZ
-        case 0x20: { const offset = small(pop()), length = small(pop()); push(toBig(keccak256(memory.view(offset, length)))); break; }
+        case 0x20: { const o = pop(), length = small(pop()), offset = start(o, length); use(6n * wordsOf(length)); mem(offset, length); push(toBig(keccak256(memory.view(offset, length)))); break; }
         case 0x30: push(self); break;
-        case 0x31: push(await state.balance(addressOf(pop()))); break;
+        case 0x31: { const a = addressOf(pop()); use(isPrecompile(a) ? WARM : touch(warm, a, COLD_ACCOUNT)); push(await wait(state.balance(a))); break; }
         case 0x32: push(BigInt(m.origin)); break;
         case 0x33: push(BigInt(m.caller)); break;
         case 0x34: push(0n); break; // CALLVALUE: this EVM carries no value
         case 0x35: { const i = pop(); push(toBig(padded(m.data, i, 32))); break; }
         case 0x36: push(BigInt(m.data.length)); break;
-        case 0x37: { const to = small(pop()), from = pop(), length = small(pop()); memory.write(to, padded(m.data, from, length)); break; }
+        case 0x37: { const t = pop(), from = pop(), length = small(pop()), to = start(t, length); use(3n * wordsOf(length)); mem(to, length); memory.write(to, padded(m.data, from, length)); break; }
         case 0x38: push(BigInt(code.length)); break;
-        case 0x39: { const to = small(pop()), from = pop(), length = small(pop()); memory.write(to, padded(code, from, length)); break; }
+        case 0x39: { const t = pop(), from = pop(), length = small(pop()), to = start(t, length); use(3n * wordsOf(length)); mem(to, length); memory.write(to, padded(code, from, length)); break; }
         case 0x3a: push(0n); break; // GASPRICE of a call
-        case 0x3b: push(BigInt((await state.code(addressOf(pop()))).length)); break;
-        case 0x3c: { const a = addressOf(pop()), to = small(pop()), from = pop(), length = small(pop()); memory.write(to, padded(await state.code(a), from, length)); break; }
+        case 0x3b: { const a = addressOf(pop()); use(isPrecompile(a) ? WARM : touch(warm, a, COLD_ACCOUNT)); push(BigInt((await wait(state.code(a))).length)); break; }
+        case 0x3c: { const a = addressOf(pop()), t = pop(), from = pop(), length = small(pop()), to = start(t, length); use((isPrecompile(a) ? WARM : touch(warm, a, COLD_ACCOUNT)) + 3n * wordsOf(length)); mem(to, length); memory.write(to, padded(await wait(state.code(a)), from, length)); break; }
         case 0x3d: push(BigInt(returndata.length)); break;
-        case 0x3e: { const to = small(pop()), from = pop(), length = small(pop()); if (from + BigInt(length) > BigInt(returndata.length)) return fail(); memory.write(to, returndata.subarray(Number(from), Number(from) + length)); break; }
-        case 0x3f: push(await state.codeHash(addressOf(pop()))); break;
+        case 0x3e: { const t = pop(), from = pop(), length = small(pop()), to = start(t, length); if (from + BigInt(length) > BigInt(returndata.length)) return fail('return data read past its end'); use(3n * wordsOf(length)); mem(to, length); memory.write(to, returndata.subarray(Number(from), Number(from) + length)); break; }
+        case 0x3f: { const a = addressOf(pop()); use(isPrecompile(a) ? WARM : touch(warm, a, COLD_ACCOUNT)); push(await wait(state.codeHash(a))); break; }
         case 0x40: return unsupported('BLOCKHASH, which needs earlier block headers');
         case 0x41: push(BigInt(env.coinbase)); break;
         case 0x42: push(BigInt(env.timestamp)); break;
@@ -175,37 +229,41 @@ async function execute(m, code) {
         case 0x44: push(BigInt(env.prevRandao)); break;
         case 0x45: push(BigInt(env.gasLimit)); break;
         case 0x46: push(BigInt(env.chainId)); break;
-        case 0x47: push(await state.balance(m.address)); break;
-        case 0x48: push(BigInt(env.baseFee)); break;
-        case 0x49: push(0n); break; // BLOBHASH: a call carries no blobs
+        case 0x47: push(await wait(state.balance(m.address))); break;
+        case 0x48: push(0n); break; // BASEFEE: a node runs a call that names no gas price with the base fee at zero
+        case 0x49: pop(); push(0n); break; // BLOBHASH: a call carries no blobs
         case 0x4a: return unsupported('BLOBBASEFEE');
         case 0x50: pop(); break;
-        case 0x51: push(toBig(memory.view(small(pop()), 32))); break;
-        case 0x52: { const offset = small(pop()); memory.write(offset, toBytes32(pop())); break; }
-        case 0x53: { const offset = small(pop()); memory.write(offset, Uint8Array.of(Number(pop() & 0xffn))); break; }
-        case 0x54: push(await state.storage(m.address, pop())); break;
+        case 0x51: { const offset = small(pop()); mem(offset, 32); push(toBig(memory.view(offset, 32))); break; }
+        case 0x52: { const offset = small(pop()); mem(offset, 32); memory.write(offset, toBytes32(pop())); break; }
+        case 0x53: { const offset = small(pop()); mem(offset, 1); memory.write(offset, Uint8Array.of(Number(pop() & 0xffn))); break; }
+        case 0x54: { const slot = pop(); use(touch(warm, m.address + slot.toString(16), COLD_SLOT)); push(await wait(state.storage(m.address, slot))); break; }
         case 0x55: return unsupported('a write to storage (SSTORE)');
         case 0x56: { const to = pop(); if (to >= BigInt(code.length) || !dests[Number(to)]) return fail(); pc = Number(to); break; }
         case 0x57: { const to = pop(), cond = pop(); if (cond !== 0n) { if (to >= BigInt(code.length) || !dests[Number(to)]) return fail(); pc = Number(to); } break; }
         case 0x58: push(BigInt(pc - 1)); break;
         case 0x59: push(BigInt(memory.size)); break;
-        case 0x5a: push(gas > 0n ? gas : 0n); break;
+        case 0x5a: push(gas); break;
         case 0x5b: break; // JUMPDEST
         case 0x5c: pop(); push(0n); break; // TLOAD: nothing was stored in this call, and TSTORE is refused
         case 0x5d: return unsupported('a write to transient storage (TSTORE)');
-        case 0x5e: { const to = small(pop()), from = small(pop()), length = small(pop()); memory.write(to, memory.read(from, length)); break; }
+        case 0x5e: { const t = pop(), f = pop(), length = small(pop()), to = start(t, length), from = start(f, length); use(3n * wordsOf(length)); mem(Math.max(to, from), length); memory.write(to, memory.read(from, length)); break; }
         case 0x5f: push(0n); break;
         case 0xf1: case 0xf4: case 0xfa: { // CALL, DELEGATECALL, STATICCALL
           let asked = pop();
           const target = addressOf(pop());
           if (op === 0xf1 && pop() !== 0n) return unsupported('a call that sends value');
-          const inOffset = small(pop()), inLength = small(pop()), outOffset = small(pop()), outLength = small(pop());
+          const inAt = pop(), inLength = small(pop()), outAt = pop(), outLength = small(pop());
+          const inOffset = start(inAt, inLength), outOffset = start(outAt, outLength);
+          use(isPrecompile(target) ? WARM : touch(warm, target, COLD_ACCOUNT));
+          // Memory for the input and for the output is paid for together, as one growth to the further end.
+          const inEnd = inLength ? inOffset + inLength : 0, outEnd = outLength ? outOffset + outLength : 0;
+          if (inEnd >= outEnd) { mem(inOffset, inLength); mem(outOffset, outLength); } else { mem(outOffset, outLength); mem(inOffset, inLength); }
           const input = memory.read(inOffset, inLength);
-          memory.grow(outOffset, outLength);
           // All but one 64th of what is left may be passed on, and no more than was asked for.
           const cap = gas - gas / 64n;
           if (asked > cap) asked = cap;
-          gas -= asked + 100n;
+          gas -= asked;
           const delegate = op === 0xf4;
           const r = await message({
             env, state, counter, origin: m.origin, depth: m.depth + 1, gas: asked, data: input, codeAddress: target,
@@ -217,8 +275,8 @@ async function execute(m, code) {
           push(r.success ? 1n : 0n);
           break;
         }
-        case 0xf3: { const offset = small(pop()), length = small(pop()); return { success: true, output: memory.read(offset, length), gasLeft: gas }; }
-        case 0xfd: { const offset = small(pop()), length = small(pop()); const output = memory.read(offset, length); if (env.onFail) env.onFail({ address: m.codeAddress, depth: m.depth, pc: pc - 1, op, why: 'REVERT', output }); return { success: false, output, gasLeft: gas }; }
+        case 0xf3: { const o = pop(), length = small(pop()), offset = start(o, length); mem(offset, length); return { success: true, output: memory.read(offset, length), gasLeft: gas }; }
+        case 0xfd: { const o = pop(), length = small(pop()), offset = start(o, length); mem(offset, length); const output = memory.read(offset, length); if (env.onFail) env.onFail({ address: m.codeAddress, depth: m.depth, pc: pc - 1, op, why: 'REVERT', output }); return { success: false, output, gasLeft: gas }; }
         case 0xfe: return fail(); // INVALID
         case 0xa0: case 0xa1: case 0xa2: case 0xa3: case 0xa4: return unsupported('a log');
         case 0xf0: case 0xf5: return unsupported('creating a contract');
@@ -226,7 +284,6 @@ async function execute(m, code) {
         case 0xff: return unsupported('SELFDESTRUCT');
         default: return unsupported(`opcode 0x${op.toString(16).padStart(2, '0')}`);
       }
-      gas -= 3n;
     } catch (e) {
       // A stack fault or a jump to nowhere ends this frame as a failure; limits and unsupported operations end the run.
       if (e instanceof EvmError && e.kind === 'fault') return fail(e.message);
@@ -235,4 +292,12 @@ async function execute(m, code) {
   }
 }
 
-export { EvmError, run };
+// What a call that is given `limit` gas has left when its code starts: a node takes 21,000 and 4 or 16 for each
+// zero or other byte of call data first, as for a transaction.
+function callGas(limit, data) {
+  let cost = 21000n;
+  for (const b of data) cost += b ? 16n : 4n;
+  return limit - cost;
+}
+
+export { EvmError, callGas, run };

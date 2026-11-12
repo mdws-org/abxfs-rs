@@ -1,15 +1,19 @@
 // A token's own page, for contracts that keep their artwork in tokenURI and have no ABX FS root.
 //
-// tokenURI is computed by the contract, so no storage proof covers it. What is shown here rests on agreement:
+// tokenURI is computed by the contract, so no storage proof covers it. What is shown here rests on agreement
+// (the check page also runs the call itself over proved state, site/evm-state.js, and says what that gives):
 // every endpoint is asked at one block, at least two must answer, and all that answer must return the same bytes.
 // The reply is then read as the metadata it claims to be: a data: URI holding JSON, whose animation_url (an HTML
 // page) or image is itself a data: URI. Anything that points off the chain is reported, not fetched.
 
 import { keccak256 } from './keccak-lookup.js';
-import { ProvedError, call } from './proved.js';
+import { CALL_GAS, ProvedError, call } from './proved.js';
 
 const toHex = (u) => '0x' + Array.from(u, (b) => b.toString(16).padStart(2, '0')).join('');
 const word = (n) => BigInt(n).toString(16).padStart(64, '0');
+const GAS = '0x' + CALL_GAS.toString(16);
+// One endpoint for each host name, so that one host is not counted as two.
+const byHost = (urls) => [...new Map(urls.map((url) => [new URL(url).host, url])).values()];
 const selector = (sig) => toHex(keccak256(new TextEncoder().encode(sig))).slice(0, 10);
 const TOKEN_URI = selector('tokenURI(uint256)'), URI = selector('uri(uint256)'); // ERC-721, ERC-1155
 const REPLY_BYTES = 12_000_000; // a metadata reply of a few megabytes is hex-encoded at twice its size
@@ -35,15 +39,21 @@ function dataUri(text) {
   const params = text.slice(5, comma).split(';'), payload = text.slice(comma + 1);
   const mime = (params[0] || 'text/plain').toLowerCase();
   if (!/^[a-z0-9][\w.+-]*\/[a-z0-9][\w.+-]*$/.test(mime)) return null;
-  if (params.includes('base64')) {
+  if (params.slice(1).some((p) => p.trim().toLowerCase() === 'base64')) {
     let bin;
     try { bin = atob(payload); } catch { return null; }
     return { mime, bytes: Uint8Array.from(bin, (c) => c.charCodeAt(0)) };
   }
-  // Not base64: the payload is text, percent-encoded or raw.
-  let plain = payload;
-  try { plain = decodeURIComponent(payload); } catch { /* raw text with a stray % */ }
-  return { mime, bytes: new TextEncoder().encode(plain) };
+  // Not base64: each %XX is one byte, whatever the bytes spell, and a % that is not followed by two hex digits is
+  // itself. Other characters are their UTF-8 bytes.
+  const raw = new TextEncoder().encode(payload), bytes = new Uint8Array(raw.length);
+  const digit = (c) => (c >= 48 && c <= 57 ? c - 48 : (c | 32) >= 97 && (c | 32) <= 102 ? (c | 32) - 87 : -1);
+  let n = 0;
+  for (let i = 0; i < raw.length; i++) {
+    const hi = raw[i] === 37 && i + 2 < raw.length ? digit(raw[i + 1]) : -1, lo = hi >= 0 ? digit(raw[i + 2]) : -1;
+    if (lo >= 0) { bytes[n++] = hi * 16 + lo; i += 2; } else bytes[n++] = raw[i];
+  }
+  return { mime, bytes: bytes.subarray(0, n) };
 }
 
 // Media types a token's page may be served as. Anything else is offered as bytes to download, never run.
@@ -73,20 +83,35 @@ function readTokenUri(uriBytes) {
     if (data && allowed.has(data.mime)) return { kind: 'page', mime: data.mime, bytes: data.bytes, name, field };
     if (data) continue;
     if (host(value)) return { kind: 'offchain', where: host(value), what: field === 'image' ? 'image' : 'animation', name };
+    // With no scheme it is an address relative to wherever the metadata is read from: off the chain all the same.
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(value)) return { kind: 'offchain', where: 'a relative address', what: field === 'image' ? 'image' : 'animation', name };
   }
   return { kind: 'none', why: 'the metadata names no page or image this viewer shows', name };
 }
 
-// One call as the endpoints agree on it at one block: `urls` are asked at once, at least two must answer, and all
-// that answer must return the same bytes. Returns { reply, sources } or throws 'rpc' / 'check'.
-async function agreedCall({ urls, to, data, block, what }) {
+// One call as the endpoints agree on it at one block: `urls` are asked at once, each host once, with the same gas
+// named to each; at least two must answer, and all that answer must return the same bytes. Returns { reply, sources } or throws 'rpc' / 'check'.
+// `more` endpoints are asked as well only when fewer than two of `urls` answer; what the first ones answered still counts.
+// An empty reply ("0x") is an answer like any other: it is compared, and when it is what they agree on, nothing was returned.
+async function agreedCall({ urls, more = [], to, data, block, what }) {
   const at = '0x' + block.toString(16);
-  const all = await Promise.allSettled([...new Set(urls)].map(async (url) => [new URL(url).host, await call(url, 'eth_call', [{ to, data }, at], 30_000, REPLY_BYTES)]));
-  const got = all.filter((a) => a.status === 'fulfilled' && typeof a.value[1] === 'string' && a.value[1].length > 2).map((a) => a.value);
+  const ask = async (list) => (await Promise.allSettled(list.map(async (url) => [new URL(url).host, await call(url, 'eth_call', [{ to, data, gas: GAS }, at], 30_000, REPLY_BYTES)])))
+    .filter((a) => a.status === 'fulfilled' && typeof a.value[1] === 'string' && /^0x([0-9a-f]{2})*$/i.test(a.value[1])).map((a) => a.value);
+  const first = byHost(urls);
+  let got = await ask(first);
+  if (got.length < 2 && more.length) { const hosts = new Set(first.map((u) => new URL(u).host)); got = [...got, ...await ask(byHost(more).filter((u) => !hosts.has(new URL(u).host)))]; }
   if (got.length < 2) throw new ProvedError('rpc', `fewer than two endpoints returned ${what} at block ${block}`);
   const hashes = got.map(([host, reply]) => [host, toHex(keccak256(new TextEncoder().encode(reply.toLowerCase())))]);
   if (new Set(hashes.map(([, h]) => h)).size > 1) throw new ProvedError('check', `the endpoints return different replies for ${what} at block ${block}: ${hashes.map(([host, h]) => `${host} ${h.slice(0, 12)}…`).join(', ')}`);
-  return { reply: got[0][1], sources: got.map(([host]) => host), hash: hashes[0][1] };
+  if (got[0][1].length <= 2) throw new ProvedError('rpc', `the endpoints return nothing for ${what} at block ${block}`);
+  return { reply: got[0][1].toLowerCase(), sources: got.map(([host]) => host), hash: hashes[0][1], call: { to, data } };
+}
+
+// What each endpoint returns for a call at the block with this hash (EIP-1898): [[host, reply], ...] for those
+// that answered. One that does not know the hash, or whose call fails, gives an error and is left out.
+async function repliesAt({ urls, to, data, blockHash }) {
+  const all = await Promise.allSettled(byHost(urls).map(async (url) => [new URL(url).host, await call(url, 'eth_call', [{ to, data, gas: GAS }, { blockHash }], 30_000, REPLY_BYTES)]));
+  return all.filter((a) => a.status === 'fulfilled' && typeof a.value[1] === 'string' && /^0x[0-9a-f]*$/i.test(a.value[1])).map((a) => [a.value[0], a.value[1].toLowerCase()]);
 }
 
 // tokenURI(token) as the endpoints agree on it at one block. `block` is a number.
@@ -98,7 +123,7 @@ async function agreedTokenUri({ urls, org, token, block }) {
     got = await agreedCall({ urls, to: org, data: URI + word(token), block, what: 'a tokenURI' }); // ERC-1155
   }
   if (got.reply.length <= 2 + 128) throw new ProvedError('rpc', `fewer than two endpoints returned a tokenURI at block ${block}`);
-  return { bytes: abiString(got.reply), sources: got.sources, block, hash: got.hash };
+  return { bytes: abiString(got.reply), sources: got.sources, block, hash: got.hash, reply: got.reply, call: got.call };
 }
 
 // ABX's generator contract, per chain (from @artblocks/abx-sdk 0.7.0, deployments). For a code project it
@@ -127,14 +152,10 @@ async function generatorPage({ chainId, urls, more = [], org, token, block }) {
   if (branch !== TEMPLATE && branch !== DIRECTORY) return { kind: 'none', why: 'the contract holds no code' };
   // A large document is more than some endpoints will compute in one call. `more` endpoints are asked only when
   // fewer than two of the first answer.
-  const ask = (list) => agreedCall({ urls: list, to: generator, data: DOCUMENT + word(org) + word(token), block, what: 'the generator\'s document' });
   let doc;
-  try { doc = await ask(urls); } catch (e) {
+  try { doc = await agreedCall({ urls, more, to: generator, data: DOCUMENT + word(org) + word(token), block, what: 'the generator\'s document' }); } catch (e) {
     if (e.kind !== 'rpc') throw e;
-    try { doc = await ask([...urls, ...more]); } catch (e2) {
-      if (e2.kind !== 'rpc') throw e2;
-      return { kind: 'unread', why: 'the project\'s page is built on chain, but fewer than two endpoints returned it; it may be larger than they will compute in one call' };
-    }
+    return { kind: 'unread', why: 'the project\'s page is built on chain, but fewer than two endpoints returned it; it may be larger than they will compute in one call' };
   }
   const bytes = abiString(doc.reply);
   if (branch === DIRECTORY) {
@@ -142,7 +163,7 @@ async function generatorPage({ chainId, urls, more = [], org, token, block }) {
     try { where = new URL(new TextDecoder().decode(bytes).trim()).host || where; } catch { /* not an address this viewer can name */ }
     return { kind: 'offchain', where, what: 'code' };
   }
-  return { kind: 'page', mime: 'text/html', bytes, field: 'generator', complete: at(1) === 1n, unresolved, sources: doc.sources, hash: doc.hash };
+  return { kind: 'page', mime: 'text/html', bytes, field: 'generator', complete: at(1) === 1n, unresolved, sources: doc.sources, hash: doc.hash, reply: doc.reply, call: doc.call, status: { reply: status.reply, call: status.call } };
 }
 
-export { GENERATORS, abiString, agreedCall, agreedTokenUri, dataUri, generatorPage, readTokenUri };
+export { GENERATORS, TOKEN_URI, abiString, agreedCall, agreedTokenUri, dataUri, generatorPage, readTokenUri, repliesAt };

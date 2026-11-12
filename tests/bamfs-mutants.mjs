@@ -14,6 +14,8 @@ const MUTANTS = [
   ['a chunk\'s bytes hashing to its id', "if (H(BACKEND, payload) !== c.id) refuse(`chunk ${c.id}: its bytes do not hash to its id`);", ''],
   ['a FastLZ literal run inside the stream', "if (i + 1 + run > d.length) refuse('a FastLZ stream ends inside a literal run');", ''],
   ['a FastLZ back-reference inside the stream', "if (i + 1 + long >= d.length) refuse('a FastLZ stream ends inside a back-reference');", ''],
+  ['the size limit covering all chunks decoded one by one', 'const part = await decode(algorithm, s, limit - decoded);', 'const part = await decode(algorithm, s, limit);'],
+  ['the size limit inside a FastLZ stream', 'if (o + n > limit) throw new LookupError', 'if (false) throw new LookupError'],
   ['a FastLZ reference after the start', "if (back > o) refuse('a FastLZ stream refers to bytes before its start');", ''],
 ];
 // Second guards: what they check is already bound by a hash above, so removing one alone changes no outcome.

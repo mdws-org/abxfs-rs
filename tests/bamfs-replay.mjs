@@ -80,5 +80,10 @@ check(flz([2, 0x61, 0x62]) === 'refused', 'FastLZ: a literal run cut short was a
 check(flz([0, 0x61, 0x20]) === 'refused', 'FastLZ: a back-reference cut short was accepted');
 check(flz([0, 0x61, 0x20, 0x05]) === 'refused', 'FastLZ: a reference before the start was accepted');
 check(flz([]) === '', 'FastLZ: an empty stream');
+// Chunks compressed one by one: the limit is on all of them together, not on each.
+const each = async (limit) => { try { return (await B.decodeEach(6, [[0, 0x61, 0x20, 0x00], [0, 0x62, 0x20, 0x00], [0, 0x63, 0x20, 0x00]].map((c) => Uint8Array.from(c)), limit)).length; } catch (e) { return e.kind || e.message; } };
+check(await each(12) === 12, 'chunks decoded one by one: twelve bytes within a limit of twelve');
+check(await each(11) === 'toolarge', 'chunks decoded one by one: twelve bytes were accepted past a limit of eleven');
+check(await each(5) === 'toolarge', 'chunks decoded one by one: three chunks of four were accepted past a limit of five');
 console.log(bad ? `${bad} of ${done} FAILED` : `ok: ${done} checks`);
 process.exit(bad ? 1 : 0);

@@ -4,9 +4,10 @@ import { CHAINS, quantity, rpc } from './chain.js';
 import { hostLabel, parseHost, viewUrl } from './target.js';
 import { BEACONS, CHECKPOINTS } from './checkpoint.js';
 import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
-import { judge, judgeRollup } from './verdict.js';
+import { judge, judgeComputed, judgeRollup } from './verdict.js';
 import { baseClaims, baseTokenParam } from './base.js';
-import { agreedTokenUri, generatorPage, readTokenUri } from './token.js';
+import { TOKEN_URI, abiString, agreedTokenUri, generatorPage, readTokenUri, repliesAt } from './token.js';
+import { computedAt } from './evm-state.js';
 import { ROLLUPS as ARBITRUM, confirmed, rollupTokenParam } from './arbitrum.js';
 import { BUILD } from './files.js';
 
@@ -156,14 +157,18 @@ async function token(chain, target, head, openUrl) {
     fact('tokenURI', `${count(got.bytes.length)} bytes, the same from ${got.sources.join(', ')} at block ${count(got.block)}`);
   } catch (e) { if (e.kind === 'check') return say('unreachable', 'The endpoints do not agree on this token.', e.message); }
   if (read.name) fact('Name in the metadata', read.name);
-  let sources = got ? got.sources : [];
+  let sources = got ? got.sources : [], shown = got;
   if (read.kind !== 'page') {
     // A code project: the document the generator contract builds from the script the collection stores.
-    const made = await generatorPage({ chainId: chain.id, urls: chain.rpcs, more: PROOF_ENDPOINTS[chain.id] || [], org: target.org, token: target.token, block: head.block }).catch((e) => (e.kind === 'check' ? { kind: 'none', why: e.message } : null));
+    let made;
+    try { made = await generatorPage({ chainId: chain.id, urls: chain.rpcs, more: PROOF_ENDPOINTS[chain.id] || [], org: target.org, token: target.token, block: head.block }); } catch (e) {
+      if (e.kind === 'check') return say('unreachable', 'The endpoints do not agree on this project\'s page.', e.message);
+      made = null;
+    }
     if (made && made.kind === 'page') {
       fact('Generator document', `${count(made.bytes.length)} bytes, the same from ${made.sources.join(', ')} at block ${count(head.block)}`);
       fact('Libraries', made.complete ? 'every library the page loads is stored on chain' : `${made.unresolved || 'at least one'} library is named by address and loaded from there; the chain does not hold it`);
-      read = made; sources = made.sources;
+      read = made; sources = made.sources; shown = made;
     } else if (made && made.kind === 'unread') return say('unreachable', 'The project\'s page could not be read.', made.why.charAt(0).toUpperCase() + made.why.slice(1) + '.');
     else if (made && made.kind === 'offchain' && read.kind !== 'offchain') read = made;
   }
@@ -173,7 +178,51 @@ async function token(chain, target, head, openUrl) {
   $('#open-link').textContent = 'Open the token\'s page';
   $('#open').hidden = !openUrl;
   const how = read.field === 'generator' ? 'This is a code project. Its page is built by ABX\'s generator contract from the script the collection stores, when the contract is asked.' : 'This contract keeps its artwork in tokenURI, which the contract computes when asked.';
-  say('agreed', 'Agreed by the endpoints. Not proved.', `${how} ${sources.length} endpoints return the same reply at block ${count(head.block)}, and the page is exactly what that reply holds. No storage proof covers a computed reply.`);
+  const agreed = `${how} ${sources.length} endpoints return the same reply at block ${count(head.block)}, and the page is exactly what that reply holds.`;
+  const cp = CHECKPOINTS[chain.id];
+  if (!cp || !PROOF_ENDPOINTS[chain.id]) return say('agreed', 'Agreed by the endpoints. Not proved.', `${agreed} No storage proof covers a computed reply, and this viewer has no light client for ${chain.name}.`);
+  if (!await proofSwitch()) return say('agreed', 'Agreed by the endpoints. Proving is switched off.', `${agreed} The operator of this host has switched proving off, which is done when a fault is found in it.`);
+
+  // Run the contract's call here, over state read by proof at the finalized block, and compare.
+  say('working', 'Following the sync committee to the newest finalized block…');
+  let computed, atFinalized = [];
+  const supporting = [];
+  try {
+    const fin = await finalizedBlock({ chainId: chain.id, checkpoint: cp.root, beacons: BEACONS[chain.id] });
+    say('working', 'Running the contract\'s code here, over state read by proof…');
+    computed = await computedAt({ chainId: chain.id, fin, urls: PROOF_ENDPOINTS[chain.id], ...shown.call });
+    if (computed.done && computed.success && read.field === 'generator') {
+      // The generator's document is shown because of two other replies: the generator's status for the collection,
+      // and a tokenURI that holds no page. Each is run here too, so that the choice does not rest on the endpoints.
+      const again = (c) => computedAt({ chainId: chain.id, fin, urls: PROOF_ENDPOINTS[chain.id], ...c, state: computed.state });
+      const status = await again(shown.status.call);
+      supporting.push({ ok: status.done && status.success && status.output === shown.status.reply, why: 'the generator\'s status for this collection, which says the page is built on chain, was not recomputed to the same reply' });
+      const uri = await again(got ? got.call : { to: target.org, data: TOKEN_URI + BigInt(target.token).toString(16).padStart(64, '0') });
+      let page = true;
+      if (uri.done && !uri.success) page = false;
+      else if (uri.done && (!got || uri.output === got.reply)) { try { page = readTokenUri(abiString(uri.output)).kind === 'page'; } catch { page = false; } }
+      supporting.push({ ok: !page, why: 'that the token\'s own tokenURI holds no page was not established here' });
+    }
+    if (computed.done) atFinalized = await repliesAt({ urls: [...PROOF_ENDPOINTS[chain.id], ...chain.rpcs], ...shown.call, blockHash: fin.executionBlockHash });
+    if (computed.done) {
+      fact('Run here at', `block ${count(computed.block.number)}, finalized; signed by ${fin.participants} of 512 sync committee members`);
+      fact('State read by proof', `${count(computed.stats.accounts)} accounts, ${count(computed.stats.words)} storage words, ${count(computed.stats.codeBytes)} bytes of contract code, served by ${computed.via} (checked here; not trusted)`);
+      fact('Endpoints at that block', atFinalized.length ? atFinalized.map(([h, r]) => `${h}: ${computed.success && r === computed.output ? 'the same reply' : 'another reply'}`).join('; ') : 'none answered');
+    }
+  } catch (e) {
+    if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${agreed} ${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
+    computed = { done: false, why: `the finalized block could not be established: ${e.message || e}` };
+  }
+  fact('Starting block', `slot ${count(cp.slot)}, ${cp.date}; trusted for 14 days`);
+  const v = judgeComputed({ computed, atFinalized, headReply: shown.reply, headBlock: head.block, supporting });
+  const texts = {
+    proved: 'Recomputed here from proved state, and the endpoints give the same.',
+    newer: 'Agreed by the endpoints, not yet provable: the page changed after the last finalized block.',
+    differs: 'Warning: this viewer and an endpoint compute different pages. One of them is wrong.',
+    agreed: 'Agreed by the endpoints. Not proved.',
+  };
+  const reason = v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.';
+  say(v.state, texts[v.state], v.state === 'proved' ? `${how} This viewer ran that code itself over the state of a finalized block, each account and storage word read with a Merkle proof. ${reason} The page is exactly what that reply holds.${read.field === 'generator' && !read.complete ? ' It loads at least one library from an address off the chain, and nothing here covers what that address serves.' : ''}` : `${agreed} ${reason}`);
 }
 
 // A rollup: which of its claims on Ethereum the current root matches.
@@ -183,7 +232,7 @@ async function rollup(chain, target, head) {
   if (!await proofSwitch()) return say('agreed', 'Agreed by the endpoints. Proving is switched off.', 'The operator of this host has switched proving off, which is done when a fault is found in it. The root above is what the endpoints agree on.');
   say('working', 'Following Ethereum\'s sync committee to a finalized block…');
   // What the rollup has on Ethereum: `settled` is a claim that is final there, `newest` one that is not (Base only).
-  let settled = null, newest = null, anchor = null, latest = null, l1Block;
+  let settled = null, newest = null, anchor = null, latest = null, latestWhy = '', l1Block;
   const unread = (number) => (e) => ({ known: false, why: `the root at ${number} could not be read by proof: ${e.message || e}` });
   try {
     const fin = await finalizedBlock({ chainId: l1, checkpoint: cp.root, beacons: BEACONS[l1] });
@@ -191,6 +240,7 @@ async function rollup(chain, target, head) {
     if (kind === 'base') {
       const claims = await baseClaims({ fin, urls: PROOF_ENDPOINTS[l1] });
       l1Block = claims.l1Block;
+      latestWhy = claims.latestWhy || '';
       settled = claims.anchor && { ...claims.anchor, what: `game ${claims.anchor.proxy}` };
       newest = claims.latest && { ...claims.latest, what: `game ${claims.latest.proxy}` };
       say('working', `Reading the project's root on ${name} at the blocks those claims name…`);
@@ -216,17 +266,19 @@ async function rollup(chain, target, head) {
   };
   line(settled, anchor, 'Final on Ethereum');
   line(newest, latest, 'Newest claim, not final');
+  if (!newest && latestWhy) fact('Newest claim', `not counted: ${latestWhy}`);
   fact('Read at', `Ethereum block ${count(l1Block.number)}, finalized`);
   fact('Starting block', `Ethereum slot ${count(cp.slot)}, ${cp.date}; trusted for 14 days`);
   const v = judgeRollup({ anchor, latest, agreedHead: head });
   const texts = {
     settled: `Matches the state ${name} has made final on Ethereum: the endpoints' root is the project's root in that state.`,
-    claimed: `Matches ${name}'s newest claim on Ethereum, which is not final. The claim was accepted from ${name}'s own prover and can still be challenged.`,
+    claimed: `Matches ${name}'s newest claim on Ethereum, which is not final. The claim is in a game of the type ${name} uses, its contract has accepted a proof for it, and it can still be challenged.`,
     agreed: 'Agreed by the endpoints. Not covered by any claim on Ethereum yet.',
   };
   // "Not covered yet" is said only when a root was read at a claim and differs; otherwise nothing was proved.
   const read = (anchor && anchor.known) || (latest && latest.known);
-  say(v.state, v.state === 'agreed' && !read ? 'Agreed by the endpoints. Not proved.' : texts[v.state], v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.');
+  const missed = [anchor, latest].some((c) => c && !c.known);
+  say(v.state, v.state === 'agreed' && !read ? 'Agreed by the endpoints. Not proved.' : v.state === 'agreed' && missed ? 'Agreed by the endpoints. One claim on Ethereum could not be read.' : texts[v.state], v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.');
 }
 
 addEventListener('hashchange', () => location.reload());

@@ -68,18 +68,15 @@ async function confirmed({ fin, urls, chainId, deps = { provedAccount, logs } })
   throw new ProvedError('rpc', `no endpoint gave what ${r.name}'s confirmed assertion was made from`);
 }
 
-// The AssertionCreated logs for one assertion in one Ethereum block, from the first endpoint that answers.
+const MAX_LOGS = 64; // from one endpoint; one assertion has one such log
+// The logs that name one assertion in one Ethereum block, from every endpoint that answers: the caller keeps the
+// one that hashes to the assertion, so an endpoint that gives something else does not hide another's.
 async function logs({ urls, address, block, assertion }) {
-  let last = new ProvedError('rpc', 'no endpoint to ask for the log');
-  for (const url of urls) {
-    try {
-      const at = '0x' + block.toString(16);
-      const list = await call(url, 'eth_getLogs', [{ address, fromBlock: at, toBlock: at, topics: [null, assertion] }]);
-      if (Array.isArray(list) && list.length && list.length <= 16) return list;
-      last = new ProvedError('rpc', `${new URL(url).host} has no such log`);
-    } catch (e) { last = e; }
-  }
-  throw last;
+  const at = '0x' + block.toString(16);
+  const all = await Promise.allSettled(urls.map((url) => call(url, 'eth_getLogs', [{ address, fromBlock: at, toBlock: at, topics: [null, assertion] }], 6_000)));
+  const lists = all.filter((a) => a.status === 'fulfilled' && Array.isArray(a.value)).map((a) => a.value.slice(0, MAX_LOGS));
+  if (!lists.length) throw (all.find((a) => a.status === 'rejected')?.reason ?? new ProvedError('rpc', 'no endpoint to ask for the log'));
+  return lists.flat().filter((log) => log && typeof log === 'object');
 }
 
 // A token parameter on the rollup at the block a confirmed assertion commits to.

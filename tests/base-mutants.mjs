@@ -19,10 +19,10 @@ const MUTANTS = [
   ['the blacklist', 'if (blacklisted) refuse(`the game at ${proxy} is blacklisted`);', ''],
   ['respected when created', 'if (!((s0 >> 144n) & 0xffn)) refuse(`the game at ${proxy} was not of the respected type when it was created`);', ''],
   ['retirement', 'if (createdAt <= retirementTimestamp) refuse(`the game at ${proxy} is retired`);', ''],
-  ['a challenged newest game not counting', 'g.status !== STATUS.challengerWins && ', ''],
-  ['a newest game needing a proof', 'g.proofCount >= 1 && ', ''],
-  ['a newest game not older than the anchor', ' && g.l2Block >= anchor.l2Block', ''],
-  ['the newest game being of the respected type', 'if (Number(newest >> 224n) === GAME_TYPE) {', 'if (true) {'],
+  ['a challenged newest game not counting', "if (g.status === STATUS.challengerWins) latestWhy", "if (false) latestWhy"],
+  ['a newest game needing a proof', "else if (g.proofCount < 1) latestWhy", "else if (false) latestWhy"],
+  ['a newest game not older than the anchor', "else if (g.l2Block < anchor.l2Block) latestWhy", "else if (false) latestWhy"],
+  ['the newest game being of the respected type', 'if (Number(entry >> 224n) !== GAME_TYPE) {', 'if (false) {'],
   ['the output root equalling the claim', 'if (outputRoot !== claim.rootClaim)', 'if (false)'],
 ];
 let bad = 0;

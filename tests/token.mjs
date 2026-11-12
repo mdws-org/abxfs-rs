@@ -29,6 +29,11 @@ const CASES = [
   ['a tokenURI that is HTML itself', enc('data:text/html;base64,' + b64(HTML)), (r) => r.kind === 'none'],
   ['an empty tokenURI', enc(''), (r) => r.kind === 'none'],
   ['bad base64 in the image', meta({ image: 'data:image/png;base64,@@@' }), (r) => r.kind === 'none'],
+  ['a PNG image as percent-encoded bytes that are not text', meta({ image: 'data:image/png,%89PNG%0D%0A%1A%0A' }), (r) => r.kind === 'page' && r.bytes.length === 8 && r.bytes[0] === 0x89 && r.bytes[7] === 0x0a],
+  ['an SVG image with escapes and a percent sign of its own', meta({ image: 'data:image/svg+xml,%3Csvg width="100%" xmlns="http://www.w3.org/2000/svg"/%3E' }), (r) => r.kind === 'page' && text(r) === '<svg width="100%" xmlns="http://www.w3.org/2000/svg"/>'],
+  ['base64 named in capitals', meta({ image: 'data:image/svg+xml;BASE64,' + b64(SVG) }), (r) => r.kind === 'page' && text(r) === SVG],
+  ['an on-chain image beside an animation at an address with no host name', meta({ animation_url: '//cdn.example/a.html', image: 'data:image/svg+xml;base64,' + b64(SVG) }), (r) => r.kind === 'offchain' && r.what === 'animation'],
+  ['an image at a relative address', meta({ image: '/ipfs/bafyabc' }), (r) => r.kind === 'offchain' && r.what === 'image'],
 ];
 for (const [name, bytes, ok] of CASES) { const r = T.readTokenUri(bytes); check(ok(r), name, r); }
 
@@ -50,6 +55,8 @@ for (const [name, behave, want] of [
   ['one down, two agree', { 'a.example': 'down', 'b.example': 'X', 'c.example': 'X' }, 'X from 2'],
   ['two down', { 'a.example': 'down', 'b.example': 'down', 'c.example': 'X' }, 'rpc'],
   ['one of three differs', { 'a.example': 'Y', 'b.example': 'X', 'c.example': 'X' }, 'check'],
+  ['one of three returns nothing, with no error', { 'a.example': () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x' })), 'b.example': 'X', 'c.example': 'X' }, 'check'],
+  ['one of three returns something that is not hex', { 'a.example': () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0xzz' })), 'b.example': 'X', 'c.example': 'X' }, 'X from 2'],
   ['a 1155 contract: tokenURI reverts everywhere, uri answers', Object.fromEntries(urls.map((u) => [new URL(u).host, (params) => (params[0].data.startsWith('0x0e89341c') ? reply('U') : new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { message: 'execution reverted' } })))])), 'U from 3'],
 ]) { world(behave); const got = await agree(); check(got === want, `agreement: ${name}`, got); }
 // The generator contract's document, against made-up endpoints.
@@ -73,6 +80,8 @@ for (const [name, behave, want] of [
     ['the endpoints give different documents', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: HTML2 + '!' } }, [], 'check'],
     ['the endpoints give different statuses', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: status(2, 0, 0), doc: HTML2 } }, [], 'check'],
     ['one endpoint will not compute the document; a further endpoint will', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: 'down' }, 'c.example': { status: T1, doc: HTML2 } }, ['https://c.example'], `page ${HTML2} complete true from 2`],
+    ['one endpoint gives a document, the other will not; a further endpoint gives another document', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: 'down' }, 'c.example': { status: T1, doc: HTML2 + '!' } }, ['https://c.example'], 'check'],
+    ['a further endpoint on a host already asked is not a second answer', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: 'down' } }, ['https://a.example/other'], 'unread'],
     ['too few endpoints will compute the document', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: 'down' } }, [], 'unread'],
   ]) { serve(behave); const got = await page(more); check(got === want, `generator: ${name}`, got); }
 }
