@@ -142,7 +142,7 @@ function quantityBytes(u, what, max = 32) { // an RLP integer: no leading zero, 
   return u;
 }
 
-// An account at a state root. Returns { storageRoot, codeHash } as hex, or null if the proof
+// An account at a state root. Returns { storageRoot, codeHash, balance } as hex, or null if the proof
 // shows the account does not exist.
 const MAX_NODES = 64;
 const nodesOf = (list, what) => {
@@ -156,7 +156,7 @@ function accountAt(stateRoot, address, accountProof) {
   if (!Array.isArray(fields) || fields.length !== 4 || fields[2].length !== 32 || fields[3].length !== 32) refuse('the account is not four fields');
   quantityBytes(fields[0], 'the account nonce', 8);
   quantityBytes(fields[1], 'the account balance');
-  return { storageRoot: toHex(fields[2]), codeHash: toHex(fields[3]) };
+  return { storageRoot: toHex(fields[2]), codeHash: toHex(fields[3]), balance: '0x' + (toHex(fields[1]).slice(2) || '0') };
 }
 
 // One storage word at a storage root, as 32 bytes of hex. A slot nothing was written to is zero.
@@ -205,7 +205,8 @@ function executionHeader(blockHash, block) {
   if (got !== blockHash.toLowerCase()) refuse(`the header the endpoint gave hashes to ${got}, not the proved block ${blockHash}`);
   const number = parseInt(block.number, 16), timestamp = parseInt(block.timestamp, 16);
   if (!Number.isSafeInteger(number) || !Number.isSafeInteger(timestamp)) refuse('the header\'s number or timestamp is too large');
-  return { stateRoot: block.stateRoot.toLowerCase(), number, timestamp };
+  // The rest of what a contract can ask about its block. `prevRandao` is the header's mixHash since the merge.
+  return { stateRoot: block.stateRoot.toLowerCase(), number, timestamp, coinbase: block.miner.toLowerCase(), gasLimit: BigInt(block.gasLimit), baseFee: BigInt(block.baseFeePerGas ?? '0x0'), prevRandao: block.mixHash.toLowerCase() };
 }
 
 export { EMPTY_CODE, EMPTY_TRIE, ProofError, accountAt, executionHeader, rlpDecode, rlpEncode, storageAt, verifyProof };
