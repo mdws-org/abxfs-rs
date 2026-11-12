@@ -1,0 +1,53 @@
+# Each week, propose a fresh starting block for the light client (site/checkpoint.js) as a pull request.
+# The root is taken only when two independent beacon nodes report the same one and the light client can start
+# from it. Nothing is merged here: a person reads the pull request and merges it.
+# Needs the repository setting "Allow GitHub Actions to create and approve pull requests".
+name: checkpoint
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Write site/checkpoint.js
+        run: python3 tools/checkpoint.py
+      - name: The offline tests still pass
+        run: |
+          python3 tools/build-view.py
+          node tests/light-replay.mjs
+          node tests/light-synth.mjs
+          node tests/proof-replay.mjs
+      - name: Open the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- site/checkpoint.js; then echo "no change"; exit 0; fi
+          branch="checkpoint/$(date -u +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add site/checkpoint.js
+          git commit -m "Light client: starting block of $(date -u +%Y-%m-%d)"
+          git push origin "$branch"
+          {
+            echo "Replaces the block roots in site/checkpoint.js with the newest finalized roots."
+            echo
+            echo "Each root was reported by two independent beacon nodes, and tests/light-live.mjs started the light client from it and reached a finalized execution block that an execution endpoint knows."
+            echo
+            echo '```'
+            git diff HEAD~1 -- site/checkpoint.js | grep '^[+-]  [0-9]'
+            echo '```'
+            echo
+            echo "To check a root by hand: open https://beaconcha.in/slot/<slot> for the slot shown and compare the block root."
+            echo "A shipped root is trusted for 14 days, so this should be merged and deployed within a week of the previous one."
+          } > body.md
+          gh pr create --base main --head "$branch" --title "Light client: starting block of $(date -u +%Y-%m-%d)" --body-file body.md

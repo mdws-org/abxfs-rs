@@ -1,0 +1,30 @@
+name: tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  viewer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Vendored files match their checksums, and the viewer builds
+        run: python3 tools/build-view.py
+      - name: Light client, recorded replies with planted lies
+        run: node tests/light-replay.mjs
+      - name: Light client, a chain whose keys the test holds
+        run: node tests/light-synth.mjs
+      - name: Light client, each check removed in turn
+        run: node tests/light-mutants.mjs
+      - name: Proofs, recorded and hand-built
+        run: node tests/proof-replay.mjs
+      - name: Proofs, each check removed in turn
+        run: node tests/proof-mutants.mjs
+      - name: Verdict rule
+        run: node tests/verdict.mjs
+      - name: Current-root rule and the stop-on-mismatch rule
+        run: node tests/head-rule.mjs && node tests/settle.mjs

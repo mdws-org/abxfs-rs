@@ -1,0 +1,19 @@
+# Daily: fail, which sends the repository's owners a notice, when
+#   - a beacon node reports a fork that site/light.js does not know, or
+#   - the block root shipped on main is within four days of the 14 it is trusted for.
+name: watch
+on:
+  schedule:
+    - cron: "41 8 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fork schedule against site/light.js
+        run: python3 tools/fork-watch.py
+      - name: Age of the shipped block roots
+        run: python3 tools/checkpoint.py --check --warn-days 10

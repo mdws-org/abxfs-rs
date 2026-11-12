@@ -3,7 +3,8 @@
 both report. The root is then given to the light client (tests/light-live.mjs), which must start from it and
 reach a finalized execution block; a root it cannot start from is not written.
 
-usage: tools/checkpoint.py [--check]     --check only reports whether the shipped roots are within their 14 days
+usage: tools/checkpoint.py                          write new roots
+       tools/checkpoint.py --check [--warn-days N]  exit 1 if a shipped root is older than N days (default 14)
 """
 import datetime
 import json
@@ -42,15 +43,15 @@ def shipped():
     return {int(i): (root, int(slot)) for i, root, slot in re.findall(r"(\d+): \{ root: '(0x[0-9a-f]{64})', slot: (\d+)", text)}
 
 
-def check():
+def check(limit):
     bad = 0
     for chain, (name, genesis, _) in SOURCES.items():
         root, slot = shipped().get(chain, (None, 0))
         age = (time.time() - (genesis + slot * 12)) / 86400
-        ok = slot > 0 and age <= MAX_AGE_DAYS
+        ok = slot > 0 and age <= limit
         bad += not ok
-        print(f"{'ok  ' if ok else 'FAIL'} {name}: shipped root at slot {slot} is {age:.1f} days old (limit {MAX_AGE_DAYS})")
-    return bad
+        print(f"{'ok  ' if ok else 'FAIL'} {name}: shipped root at slot {slot} is {age:.1f} days old (trusted for {MAX_AGE_DAYS}, reported past {limit})")
+    return 1 if bad else 0
 
 
 def write():
@@ -79,4 +80,7 @@ def write():
 
 
 if __name__ == "__main__":
-    sys.exit(check() if "--check" in sys.argv else write())
+    if "--check" in sys.argv:
+        days = float(sys.argv[sys.argv.index("--warn-days") + 1]) if "--warn-days" in sys.argv else MAX_AGE_DAYS
+        sys.exit(check(days))
+    sys.exit(write())
