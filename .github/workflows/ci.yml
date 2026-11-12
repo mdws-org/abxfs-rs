@@ -30,3 +30,16 @@ jobs:
         run: node tests/verdict.mjs
       - name: Current-root rule and the stop-on-mismatch rule
         run: node tests/head-rule.mjs && node tests/settle.mjs
+  reader:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Rust reader and run its tests
+        run: cargo build --release --locked && cargo test --release --locked
+      - name: Read a Robinhood Chain project's root and compare it with the plan of what was read
+        run: |
+          set -e
+          root=0x6c9ecd770bdcc3d7a0b3cf815d35f906658a12b2d93fc89cbef08ff605d21537
+          ./target/release/abxfs-rs read "$root" --chain robinhood --out got
+          ls -la got
+          ./target/release/abxfs-rs verify "$root" got --chain robinhood
