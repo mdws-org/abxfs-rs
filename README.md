@@ -92,12 +92,45 @@ sha256 04f952c55d63630d2c6db5fd7eb51e19cb4960cab98bfa28b73e96c45f95cc93  site/pk
 
 The hostname names what is shown, so every project and every root is its own web origin (`site/target.js`):
 
-- `<chain id>-<org address, 40 hex>-<token id>` is a project. Its current root is the token's `abxfs.cid` param. No hash covers that read, so every configured endpoint is asked at the same block (the lowest any of them reports). At least two must answer and all that answer must agree.
+- `<chain id>-<org address, 40 hex>-<token id>` is a project. Its current root is the token's `abxfs.cid` param. No hash covers that read, so every configured endpoint is asked at the same block (the lowest any of them reports). At least two must answer and all that answer must agree. On Ethereum and Sepolia the root is also read by proof and the two are compared; see "Proving a project's current root" below.
 - `r<chain id>-<root, 52 base32 characters>` is one root. Nothing is taken from an endpoint unchecked.
 
 A project's scripts run in the viewer's origin and can write its storage, so nothing stored is trusted. The worker stores raw chain replies only, and each one passes the same checks as a fresh reply every time it is used. Checked results are held in the worker's memory. A reply that fails a check is read again from the same endpoint, then from the next one.
 
 The host serves the same static files on every subdomain and `index.html` for any path that is not one of them. That fallback is required: a browser fetches a service worker script from the host, never through the viewer, so a project that tries to register its own worker gets HTML and is refused. `view/_headers` lists the response headers the host must send. `/_abxfs/info.html` on any viewer hostname lists what was read and checked, and can reset the viewer for that address.
+
+### Proving a project's current root
+
+On Ethereum and Sepolia the viewer reads a project's current root a second way, with no server believed, and compares the result with what the endpoints give.
+
+1. `site/light.js` is a light client for Ethereum's consensus layer. It starts from a finalized block root built into the viewer (`site/checkpoint.js`), fetches that block's sync committee, and follows the committee from period to period up to the present. For each header it uses, it checks the BLS aggregate signature of the sync committee (at least 342 of the 512 members must have signed) and the Merkle branches that tie a committee, a finalized header and an execution block hash to a signed header. The result is the hash of the newest finalized execution block. Both header forms are read: the Electra and Fulu form, and the Gloas form, in which a header carries an execution block hash and no state root.
+2. `site/proof.js` takes that block's header from any execution endpoint and re-hashes it. A header that hashes to the proved block hash gives a state root that can be believed. An account proof against the state root gives the contract's code hash and storage root, and a storage proof against the storage root gives one storage word.
+3. `site/proved.js` computes where an ABX collection keeps a token parameter: ERC-7201 namespace `abx.storage.params`, slot `keccak(key . keccak(tokenId . base))`, with the `isSet` flag in the next slot. A collection is a 44-byte proxy that can only run one implementation, so the layout cannot change. The viewer proves that the account's code hash is the hash of those 44 bytes and reads nothing from any other contract.
+
+A finalized block is about a quarter of an hour behind the head. The endpoints are therefore asked for the root at the finalized block as well as at the head, and `site/verdict.js` compares:
+
+| At the finalized block | At the head | Verdict |
+|---|---|---|
+| The proof and every endpoint that answered give one root | The same root | Proved |
+| The proof and every endpoint that answered give one root | Another root | Published since the finalized block; agreed by the endpoints, not yet provable |
+| An endpoint gives a root that differs from the proof | Any | Mismatch |
+| No proof could be made | Any | Agreed by the endpoints, with the reason |
+
+On a mismatch the project is not shown. One of the two readings is wrong and the viewer cannot tell which, so the page lists both roots, the block, which endpoint gave which root, and a fixed-root address for each version.
+
+A project's own hostname states no verdict. A project's scripts run there and can rewrite any text the viewer shows, the info page included. The verdict is on the check page, `check.<host>/#<chain id>-<org address>-<token id>`, which has no service worker and which a project's scripts cannot reach. Links to a project must open the check page first.
+
+The light client is hand-written and follows the consensus-specs light-client sync protocol; function names match the specification. The curve arithmetic and SHA-256 are `@noble/curves` and `@noble/hashes`, copied into `site/vendor/noble/` by `tools/vendor-noble.py`. `tools/build-view.py` stops if a vendored file does not match `site/vendor/noble/SHA256SUMS`.
+
+The proof depends on three things:
+
+- The block root in `site/checkpoint.js`. `tools/checkpoint.py` writes it only when two independent beacon nodes report the same finalized root and the light client can start from it. The light client refuses a root older than 14 days (the weak-subjectivity period at mainnet's stake is 15.7 days), so a build that is never refreshed stops proving. `.github/workflows/checkpoint.yml` proposes a new root each week as a pull request.
+- Fewer than two thirds of each sync committee since that block signing a false header. Committee members are not penalised for doing so. The comparison with the endpoints exists for this case and for a fault in the viewer's own checks.
+- The fork schedule in `site/light.js`. A fork can change the header fields and the Merkle positions. `tools/fork-watch.py` exits 1 when a beacon node reports a fork that `light.js` does not list, and `.github/workflows/watch.yml` runs it every day. A header from an unknown fork fails its checks, and the viewer then shows the endpoints' root with no proof.
+
+The host can switch proving off for every installed viewer by serving `{"proof": false}` at `/_abxfs/switch.json`. Use it if a fault is found in the proof code. The switch cannot turn proving on, and it cannot change a verdict.
+
+Base, Arbitrum One and Robinhood Chain have no proof yet. The check page says "Agreed by the endpoints. Not proved." for projects on those chains.
 
 What is left to trust, and how to reduce it:
 
@@ -122,4 +155,21 @@ node tests/head-rule.mjs                                  # the current-root rul
 node tests/host-gone.mjs http://<label>.localhost:8853/ <pid of view-serve.py>   # a project still opens after the host is stopped
 node tests/endpoint-setting.mjs http://<label>.localhost:8853/   # the reader's own endpoint: refused, saved, planted, cleared
 node tests/hostile-page.mjs http://<label>.localhost:8853/ /index.html   # what a project's own scripts can try: a worker of their own, rewriting storage
+```
+
+Tests of the proof. All but the three marked "live" run offline, and `.github/workflows/ci.yml` runs the offline ones on every push:
+
+```
+node tests/spec-vectors.mjs     # the official single_merkle_proof vectors: light.js's Merkle positions and branch function
+node tests/light-replay.mjs     # recorded mainnet and Sepolia replies, then one lie planted at a time; each must be refused
+node tests/light-synth.mjs      # a made-up chain whose committee keys the test holds: 341 and 342 signers, cancelling keys, padded branches
+node tests/light-mutants.mjs    # light.js with one check removed at a time; each removal must fail a test
+node tests/proof-replay.mjs     # recorded proofs from four chains, RLP cases, hand-built tries
+node tests/proof-mutants.mjs    # proof.js with one check removed at a time
+node tests/verdict.mjs          # the verdict table
+node tests/settle.mjs           # the service worker stops on a mismatch and only on a mismatch
+node tests/light-live.mjs mainnet            # live: from a finalized root two beacon nodes report to an execution block
+node tests/proved-live.mjs                   # live: a project's root by proof through each proof endpoint
+node tests/check-page.mjs                    # live: the check page in a browser (needs tools/view-serve.py running)
+LODESTAR_DIR=<dir> node tests/light-lodestar.mjs   # the same recordings and lies given to Lodestar's light client
 ```
