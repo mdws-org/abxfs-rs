@@ -12,8 +12,8 @@
 // code an endpoint gives must hash to it.
 
 import { keccak256 } from './keccak-lookup.js';
-import { accountAt, executionHeader, storageAt } from './proof.js';
-import { COLLECTION_CODE_HASH, ProvedError, call, paramSlots, provedAccount, provedCode } from './proved.js';
+import { accountAt, executionHeader } from './proof.js';
+import { ProvedError, call, collectionParamAt, provedAccount, provedCode } from './proved.js';
 
 const toHex = (u) => '0x' + Array.from(u, (b) => b.toString(16).padStart(2, '0')).join('');
 const fromHex = (h) => Uint8Array.from(h.replace(/^0x/, '').match(/../g)?.map((x) => parseInt(x, 16)) ?? []);
@@ -109,7 +109,6 @@ async function baseClaims({ fin, urls, deps = { provedAccount, provedCode } }) {
 //   keccak(version 0 . L2 state root . storage root of the L2-to-L1 message passer . L2 block hash)
 // Its parts come from an untrusted Base endpoint and must hash to the claim, which also settles which block it is. `urls` are Base proof endpoints.
 async function baseTokenParam({ claim, urls = BASE_PROOF_ENDPOINTS, org, token, key }) {
-  const slots = paramSlots(token, key);
   const at = '0x' + claim.l2Block.toString(16);
   let last = new ProvedError('rpc', 'no endpoint to ask for a proof');
   for (const url of urls) {
@@ -121,14 +120,8 @@ async function baseTokenParam({ claim, urls = BASE_PROOF_ENDPOINTS, org, token, 
       const passerAccount = accountAt(header.stateRoot, MESSAGE_PASSER, passer.accountProof) || refuse('the message passer does not exist in that state');
       const outputRoot = hash(word(0), header.stateRoot, passerAccount.storageRoot, block.hash);
       if (outputRoot !== claim.rootClaim) throw new ProvedError('check', `the block the endpoint gave makes the output root ${outputRoot}, not the claim ${claim.rootClaim}`);
-      const reply = await call(url, 'eth_getProof', [org, slots, at]);
-      if (!reply || !Array.isArray(reply.accountProof) || !Array.isArray(reply.storageProof) || reply.storageProof.length !== 2) throw new ProvedError('check', 'the endpoint did not return the proofs asked for');
       const l2 = { number: header.number, hash: block.hash.toLowerCase(), timestamp: header.timestamp };
-      const account = accountAt(header.stateRoot, org, reply.accountProof);
-      if (!account) return { known: false, why: 'there was no contract at this address at that block', block: l2 };
-      if (account.codeHash !== COLLECTION_CODE_HASH) return { known: false, why: 'the contract at this address is not an ABX collection this viewer knows the layout of', block: l2 };
-      const root = storageAt(account.storageRoot, slots[0], reply.storageProof[0].proof), flags = BigInt(storageAt(account.storageRoot, slots[1], reply.storageProof[1].proof));
-      return { known: true, root, isSet: Boolean((flags >> 8n) & 1n), block: l2, via: new URL(url).host };
+      return { ...await collectionParamAt({ url, stateRoot: header.stateRoot, at, org, token, key }), block: l2, via: new URL(url).host };
     } catch (e) { last = e; }
   }
   throw last;

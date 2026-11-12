@@ -174,6 +174,26 @@ async function provedCode({ urls, address, codeHash, blockNumber }) {
   throw last;
 }
 
+// A collection's token parameter at a state root that is already believed, on any chain: the account proof, the
+// collection code hash, and the two storage words. `at` is the block tag to ask the endpoint for.
+// Returns { known: false, why } or { known: true, root, isSet, valueIsHash }.
+async function collectionParamAt({ url, stateRoot, at, org, token, key = KEY_CID }) {
+  const slots = paramSlots(token, key);
+  const reply = await call(url, 'eth_getProof', [org, slots, at]);
+  if (!reply || !Array.isArray(reply.accountProof) || !Array.isArray(reply.storageProof) || reply.storageProof.length !== 2) throw new ProvedError('check', 'the endpoint did not return the proofs asked for');
+  const account = accountAt(stateRoot, org, reply.accountProof);
+  if (!account) return { known: false, why: 'there was no contract at this address at that block' };
+  if (account.codeHash !== COLLECTION_CODE_HASH) return { known: false, why: 'the contract at this address is not an ABX collection this viewer knows the layout of' };
+  const read = (i) => {
+    const sp = reply.storageProof[i];
+    if (!sp || !Array.isArray(sp.proof)) throw new ProvedError('check', 'a storage proof is missing');
+    return storageAt(account.storageRoot, slots[i], sp.proof);
+  };
+  const root = read(0), flags = BigInt(read(1));
+  if (flags >> 16n) throw new ProvedError('check', 'the parameter\'s flags hold more than two flags');
+  return { known: true, root, valueIsHash: Boolean(flags & 1n), isSet: Boolean((flags >> 8n) & 1n) };
+}
+
 // What the endpoints return for tokenParam(token, key) at one block, asked of each `url` at once.
 // Returns [[host, root], ...] for those that answered; the caller needs at least two.
 // With `blockHash` the block is named by its hash (EIP-1898), so an endpoint cannot answer for another block
@@ -190,4 +210,4 @@ async function tokenParamAt({ urls, org, token, block, blockHash, key = KEY_CID 
   return all.filter((a) => a.status === 'fulfilled').map((a) => a.value);
 }
 
-export { COLLECTION_CODE_HASH, KEY_CID, PROOF_ENDPOINTS, ProvedError, call, finalizedBlock, paramSlots, provedAccount, provedCode, provedTokenParam, tokenParamAt };
+export { COLLECTION_CODE_HASH, KEY_CID, PROOF_ENDPOINTS, ProvedError, call, collectionParamAt, finalizedBlock, paramSlots, provedAccount, provedCode, provedTokenParam, tokenParamAt };

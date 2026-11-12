@@ -156,7 +156,11 @@ A verdict on Base never stops a page. A claim that is not final rests on Base's 
 
 Proofs at the anchor's Base block need an endpoint that keeps state for 5 days. One public endpoint was found that does (`BASE_PROOF_ENDPOINTS` in `site/base.js`). If it does not answer, the anchor comparison is not made and the check page says so.
 
-Arbitrum One and Robinhood Chain have no proof yet. The check page says "Agreed by the endpoints. Not proved." for projects on those chains.
+### Arbitrum One and Robinhood Chain
+
+Both run the same rollup contract on Ethereum (`site/arbitrum.js`). Its storage holds the hash of the newest confirmed assertion, read by proof at the finalized Ethereum block. An assertion's hash is `keccak(parent . keccak(state after it) . inbox accumulator)`, and the state after it holds the hash of a rollup block. What the hash was made from comes from the `AssertionCreated` log an endpoint gives, and must hash to it. The rollup block's header, re-hashed, gives its state root, and the project's root is read there by storage proof. The rollup contract is a proxy with two implementations; both addresses are proved and must be the pinned ones.
+
+A confirmed assertion is about 6.4 days old. The check page says "Matches the state Arbitrum One has made final on Ethereum" when the endpoints' current root is the root at that block, and "Agreed by the endpoints" otherwise. No public endpoint was found that serves proofs on Robinhood Chain at a block that old, so for Robinhood the assertion is read and the root is not, and the check page says so.
 
 What is left to trust, and how to reduce it:
 
@@ -196,10 +200,13 @@ node tests/verdict.mjs          # the verdict table
 node tests/base-rules.mjs       # each rule for Base's contracts on Ethereum, against a made-up state
 node tests/base-replay.mjs      # a recorded read on Base at a claim's block, then one digit changed in every reply
 node tests/base-mutants.mjs     # base.js with one rule removed at a time
+node tests/arbitrum-rules.mjs   # each rule for an Arbitrum-family rollup contract, against a made-up state
+node tests/arbitrum-mutants.mjs # arbitrum.js with one rule removed at a time
 node tests/settle.mjs           # the service worker stops on a mismatch and only on a mismatch
 node tests/light-live.mjs mainnet            # live: from a finalized root two beacon nodes report to an execution block
 node tests/proved-live.mjs                   # live: a project's root by proof through each proof endpoint
 node tests/base-live.mjs                     # live: Base's anchor and newest claims, and a project's root at each
+node tests/arbitrum-live.mjs                 # live: the confirmed assertion of Arbitrum One and Robinhood Chain
 node tests/check-page.mjs                    # live: the check page in a browser (needs tools/view-serve.py running)
 LODESTAR_DIR=<dir> node tests/light-lodestar.mjs   # the same recordings and lies given to Lodestar's light client
 ```

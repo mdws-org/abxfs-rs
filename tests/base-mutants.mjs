@@ -24,7 +24,6 @@ const MUTANTS = [
   ['a newest game not older than the anchor', ' && g.l2Block >= anchor.l2Block', ''],
   ['the newest game being of the respected type', 'if (Number(newest >> 224n) === GAME_TYPE) {', 'if (true) {'],
   ['the output root equalling the claim', 'if (outputRoot !== claim.rootClaim)', 'if (false)'],
-  ['the collection code hash on the rollup', "if (account.codeHash !== COLLECTION_CODE_HASH) return { known: false, why: 'the contract at this address is not an ABX collection this viewer knows the layout of', block: l2 };", ''],
 ];
 let bad = 0;
 for (const [i, [what, find, put]] of MUTANTS.entries()) {

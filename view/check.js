@@ -6,13 +6,14 @@ import { BEACONS, CHECKPOINTS } from './checkpoint.js';
 import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
 import { judge, judgeRollup } from './verdict.js';
 import { baseClaims, baseTokenParam } from './base.js';
+import { ROLLUPS as ARBITRUM, confirmed, rollupTokenParam } from './arbitrum.js';
 import { BUILD } from './files.js';
 
 const $ = (s) => document.querySelector(s);
 const ZERO = '0x' + '0'.repeat(64);
-const MAX_LAG = { 1: 10, 11155111: 10, 8453: 60 };
+const MAX_LAG = { 1: 10, 11155111: 10, 8453: 60, 42161: 480, 4663: 1200 };
 // Rollups whose claims on Ethereum this viewer can read, and the chain those claims are on.
-const ROLLUPS = { 8453: { name: 'Base', l1: 1 } };
+const ROLLUPS = { 8453: { name: 'Base', l1: 1, kind: 'base' }, 42161: { name: 'Arbitrum One', l1: 1, kind: 'arbitrum' }, 4663: { name: 'Robinhood Chain', l1: 1, kind: 'arbitrum' } };
 const ago = (seconds) => (seconds < 90 ? `${Math.round(seconds)} seconds` : seconds < 5400 ? `${Math.round(seconds / 60)} minutes` : seconds < 172800 ? `${Math.round(seconds / 3600)} hours` : `${Math.round(seconds / 86400)} days`);
 const count = (n) => n.toLocaleString('en-US');
 
@@ -123,32 +124,45 @@ async function run() {
 
 // A rollup: which of its claims on Ethereum the current root matches.
 async function rollup(chain, target, head) {
-  const { name, l1 } = ROLLUPS[chain.id];
+  const { name, l1, kind } = ROLLUPS[chain.id];
   const cp = CHECKPOINTS[l1];
   if (!await proofSwitch()) return say('agreed', 'Agreed by the endpoints. Proving is switched off.', 'The operator of this host has switched proving off, which is done when a fault is found in it. The root above is what the endpoints agree on.');
   say('working', 'Following Ethereum\'s sync committee to a finalized block…');
-  let claims, anchor = null, latest = null;
+  // What the rollup has on Ethereum: `settled` is a claim that is final there, `newest` one that is not (Base only).
+  let settled = null, newest = null, anchor = null, latest = null, l1Block;
+  const unread = (number) => (e) => ({ known: false, why: `the root at ${number} could not be read by proof: ${e.message || e}` });
   try {
     const fin = await finalizedBlock({ chainId: l1, checkpoint: cp.root, beacons: BEACONS[l1] });
-    say('working', `Reading ${name}'s claims on Ethereum by proof…`);
-    claims = await baseClaims({ fin, urls: PROOF_ENDPOINTS[l1] });
-    say('working', `Reading the project's root on ${name} at the blocks those claims name…`);
-    const at = (claim) => (claim ? baseTokenParam({ claim, org: target.org, token: target.token }).catch((e) => ({ known: false, why: `the root at block ${claim.l2Block} could not be read by proof: ${e.message || e}` })) : null);
-    [anchor, latest] = await Promise.all([at(claims.anchor), at(claims.latest)]);
+    say('working', `Reading what ${name} has on Ethereum by proof…`);
+    if (kind === 'base') {
+      const claims = await baseClaims({ fin, urls: PROOF_ENDPOINTS[l1] });
+      l1Block = claims.l1Block;
+      settled = claims.anchor && { ...claims.anchor, what: `game ${claims.anchor.proxy}` };
+      newest = claims.latest && { ...claims.latest, what: `game ${claims.latest.proxy}` };
+      say('working', `Reading the project's root on ${name} at the blocks those claims name…`);
+      const at = (claim) => (claim ? baseTokenParam({ claim, org: target.org, token: target.token }).catch(unread(`block ${claim.l2Block}`)) : null);
+      [anchor, latest] = await Promise.all([at(claims.anchor), at(claims.latest)]);
+    } else {
+      const claim = await confirmed({ fin, urls: PROOF_ENDPOINTS[l1], chainId: chain.id });
+      l1Block = claim.l1Block;
+      settled = { ...claim, what: `assertion ${claim.assertion}` };
+      say('working', `Reading the project's root on ${name} at the block that assertion commits to…`);
+      anchor = await rollupTokenParam({ claim, chainId: chain.id, org: target.org, token: target.token }).catch(unread(`block ${claim.blockHash}`));
+    }
   } catch (e) {
     fact('Starting block', `Ethereum slot ${count(cp.slot)}, ${cp.date}`);
     if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
-    return say('agreed', 'Agreed by the endpoints. Not proved.', `${name}'s claims on Ethereum could not be read by proof: ${e.message || e}`);
+    return say('agreed', 'Agreed by the endpoints. Not proved.', `What ${name} has on Ethereum could not be read by proof: ${e.message || e}`);
   }
   const now = Date.now() / 1000;
   const line = (claim, got, what) => {
-    if (!claim) return fact(what, 'none that counts');
-    fact(what, `${name} block ${count(claim.l2Block)}, ${got && got.known ? ago(now - got.block.timestamp) + ' old' : 'claim posted ' + ago(now - claim.createdAt) + ' ago'}; game ${claim.proxy}`);
-    fact(`Root at that block`, got && got.known ? got.root : (got && got.why) || 'not read', Boolean(got && got.known));
+    if (!claim) return;
+    fact(what, `${got && got.block ? `${name} block ${count(got.block.number)}, ${ago(now - got.block.timestamp)} old` : `${name} block ${claim.l2Block ? count(claim.l2Block) : claim.blockHash}`}; ${claim.what}`);
+    fact('Root at that block', got && got.known ? got.root : (got && got.why) || 'not read', Boolean(got && got.known));
   };
-  line(claims.anchor, anchor, 'Final on Ethereum');
-  line(claims.latest, latest, 'Newest claim, not final');
-  fact('Claims read at', `Ethereum block ${count(claims.l1Block.number)}, finalized`);
+  line(settled, anchor, 'Final on Ethereum');
+  line(newest, latest, 'Newest claim, not final');
+  fact('Read at', `Ethereum block ${count(l1Block.number)}, finalized`);
   fact('Starting block', `Ethereum slot ${count(cp.slot)}, ${cp.date}; trusted for 14 days`);
   const v = judgeRollup({ anchor, latest, agreedHead: head });
   const texts = {
@@ -156,7 +170,9 @@ async function rollup(chain, target, head) {
     claimed: `Matches ${name}'s newest claim on Ethereum, which is not final. The claim was accepted from ${name}'s own prover and can still be challenged.`,
     agreed: 'Agreed by the endpoints. Not covered by any claim on Ethereum yet.',
   };
-  say(v.state, texts[v.state], v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.');
+  // "Not covered yet" is said only when a root was read at a claim and differs; otherwise nothing was proved.
+  const read = (anchor && anchor.known) || (latest && latest.known);
+  say(v.state, v.state === 'agreed' && !read ? 'Agreed by the endpoints. Not proved.' : texts[v.state], v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.');
 }
 
 addEventListener('hashchange', () => location.reload());
