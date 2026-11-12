@@ -44,8 +44,8 @@ jobs:
           EVM_DIR="$RUNNER_TEMP/evm" node tests/evm-mutants.mjs
       - name: Verdict rule, then the rule for computed pages with each condition removed in turn
         run: node tests/verdict.mjs && node tests/verdict-mutants.mjs
-      - name: Current-root rule and the stop-on-mismatch rule
-        run: node tests/head-rule.mjs && node tests/settle.mjs
+      - name: Current-root rule, the stop-on-mismatch rule, and the warning for a token page computed differently
+        run: node tests/head-rule.mjs && node tests/settle.mjs && node tests/recheck.mjs
   reader:
     runs-on: ubuntu-latest
     steps:
