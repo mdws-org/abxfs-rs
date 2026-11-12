@@ -124,6 +124,56 @@ async function provedTokenParam({ fin, urls, org, token, key = KEY_CID }) {
   throw last;
 }
 
+// A block's header from one endpoint, checked against the block hash, kept while several accounts are read at it.
+const headers = new Map();
+function headerOf(url, blockHash) {
+  const key = `${url} ${blockHash}`;
+  if (!headers.has(key)) {
+    if (headers.size > 32) headers.clear();
+    headers.set(key, call(url, 'eth_getBlockByHash', [blockHash, false]).then((block) => executionHeader(blockHash, block)));
+    headers.get(key).catch(() => headers.delete(key));
+  }
+  return headers.get(key);
+}
+
+// Any account at the block `fin` names, read by proof: whether it exists, its code hash, and the storage words
+// asked for. `slots` are 32-byte slot numbers as hex. `urls` are tried in turn until one returns a header and
+// proofs that check. Returns { exists: false, block } or { exists: true, codeHash, words, block, via }.
+async function provedAccount({ fin, urls, address, slots = [] }) {
+  let last = new ProvedError('rpc', 'no endpoint to ask for a proof');
+  for (const url of urls) {
+    try {
+      const header = await headerOf(url, fin.executionBlockHash);
+      const reply = await call(url, 'eth_getProof', [address, slots, '0x' + header.number.toString(16)]);
+      if (!reply || !Array.isArray(reply.accountProof) || !Array.isArray(reply.storageProof) || reply.storageProof.length !== slots.length) throw new ProvedError('check', 'the endpoint did not return the proofs asked for');
+      const block = { number: header.number, hash: fin.executionBlockHash, timestamp: header.timestamp };
+      const account = accountAt(header.stateRoot, address, reply.accountProof);
+      if (!account) return { exists: false, block, via: new URL(url).host };
+      const words = slots.map((slot, i) => {
+        const sp = reply.storageProof[i];
+        if (!sp || !Array.isArray(sp.proof)) throw new ProvedError('check', 'a storage proof is missing');
+        return storageAt(account.storageRoot, slot, sp.proof);
+      });
+      return { exists: true, codeHash: account.codeHash, words, block, via: new URL(url).host };
+    } catch (e) { last = e; }
+  }
+  throw last;
+}
+
+// An account's code at a block, believed once it hashes to a code hash that was proved.
+async function provedCode({ urls, address, codeHash, blockNumber }) {
+  let last = new ProvedError('rpc', 'no endpoint to ask for the code');
+  for (const url of urls) {
+    try {
+      const code = await call(url, 'eth_getCode', [address, '0x' + blockNumber.toString(16)]);
+      if (typeof code !== 'string' || !/^0x([0-9a-f]{2})*$/i.test(code) || code.length > 2 + 2 * 24576) throw new ProvedError('check', 'the endpoint did not return code');
+      if (toHex(keccak256(fromHex(code))) !== codeHash) throw new ProvedError('check', 'the code the endpoint gave does not hash to the proved code hash');
+      return code.toLowerCase();
+    } catch (e) { last = e; }
+  }
+  throw last;
+}
+
 // What the endpoints return for tokenParam(token, key) at one block, asked of each `url` at once.
 // Returns [[host, root], ...] for those that answered; the caller needs at least two.
 // With `blockHash` the block is named by its hash (EIP-1898), so an endpoint cannot answer for another block
@@ -140,4 +190,4 @@ async function tokenParamAt({ urls, org, token, block, blockHash, key = KEY_CID 
   return all.filter((a) => a.status === 'fulfilled').map((a) => a.value);
 }
 
-export { COLLECTION_CODE_HASH, KEY_CID, PROOF_ENDPOINTS, ProvedError, finalizedBlock, paramSlots, provedTokenParam, tokenParamAt };
+export { COLLECTION_CODE_HASH, KEY_CID, PROOF_ENDPOINTS, ProvedError, call, finalizedBlock, paramSlots, provedAccount, provedCode, provedTokenParam, tokenParamAt };
