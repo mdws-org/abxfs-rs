@@ -172,7 +172,7 @@ A code project whose `tokenURI` points at a resolver still has its page on chain
 
 When the metadata, the art it names, or a project's code is at an address off the chain, the viewer says where and shows nothing. It does not fetch it.
 
-A `tokenURI` reply is computed by the contract, so no storage proof covers it. On Base, Arbitrum One and Robinhood Chain the check page says "Agreed by the endpoints. Not proved." for a token page.
+A `tokenURI` reply is computed by the contract, so no storage proof covers it. On Robinhood Chain the check page says "Agreed by the endpoints. Not proved." for a token page. On Ethereum, Base and Arbitrum One the call is also run by the viewer itself, as the next two sections say.
 
 ### Token pages on Ethereum: the call is run here
 
@@ -193,7 +193,15 @@ A generator document is shown because of two other replies: the generator's stat
 
 The call runs in a worker (`view/evm-worker.js`), so the page stays responsive. Each call stops after 60 seconds of computing or 120 seconds of fetching, and at 600 requests; the page ends the worker itself after 200 seconds. A browser that cannot start a worker gets "Agreed by the endpoints. Not proved." What a hint asks for may use half of those requests and 4,000 storage words.
 
-The viewer's own pages (the service worker) still serve the reply the endpoints agree on. Only the check page says whether that reply was also recomputed.
+The viewer's own token pages use the same recomputation. A token page is served at once, as the endpoints agree on it, and the call is then run in the service worker behind it. When this viewer and an endpoint give different replies, the next load of the page is a warning of the viewer's own that shows both replies' hashes and a link on to the token page. Nothing there can tell which side is wrong, so the page is not refused. The `x-abxfs-recomputed` response header gives the state.
+
+### Token pages on Base and Arbitrum One: run over the state of a claim
+
+On Base and Arbitrum One the check page runs a token page's call over the rollup's own state, at the block a claim on Ethereum commits to. On Base that is the newest claim, or the final one when the newest does not count. On Arbitrum One it is the latest confirmed assertion. The block is reached by proof from Ethereum, and every account and storage word is proved against that block's state root.
+
+Endpoints seldom keep a block that old, so there is often nothing to compare the result with, and a comparison is what catches a fault in this viewer's own EVM. So the label is a weaker one: "Recomputed here from the state of Base's newest claim on Ethereum. Not proved." The reason says how many endpoints answered at that block. An endpoint that returns another reply there is a warning. When the reply now is another, the check page says that the page changed since or that the viewer computes it differently, and that it cannot tell which.
+
+The EVM's rules are Ethereum's. On another chain it refuses what could differ (`OTHER_CHAINS` in `site/evm-state.js`): `CLZ` on both, and on Arbitrum One the opcodes that read the block (`NUMBER` there is Ethereum's block number) and calls to the contracts Arbitrum keeps at addresses 0x64 to 0xff. Robinhood Chain is not run: no public endpoint keeps its state long enough.
 
 ### Arbitrum One and Robinhood Chain
 
@@ -251,6 +259,10 @@ node tests/proved-live.mjs                   # live: a project's root by proof t
 node tests/base-live.mjs                     # live: Base's anchor and newest claims, and a project's root at each
 node tests/arbitrum-live.mjs                 # live: the confirmed assertion of Arbitrum One and Robinhood Chain
 node tests/token-page.mjs                    # live: token pages in a browser equal an independent read of tokenURI
+node tests/evm-chains.mjs       # what the EVM refuses on Base and Arbitrum One
+node tests/recheck.mjs          # the service worker's warning for a token page it computes differently
+node tests/evm-rollup-live.mjs               # live: 7 calls over Base and Arbitrum One state at their claims' blocks equal eth_call there
+node tests/recheck-page.mjs                  # live: a token page is served at once and recomputed behind it
 node tests/worker-page.mjs                   # live: the check page's worker runs a call, is ended when it never answers, and may be missing
 node tests/evm-context-live.mjs              # live: gas left, base fee, caller and 15 more values, the same here and on the endpoints
 node tests/evm-live.mjs                      # live: 8 real calls run here over proved state equal eth_call at the finalized block
@@ -261,4 +273,4 @@ node tests/check-page.mjs                    # live: the check page in a browser
 LODESTAR_DIR=<dir> node tests/light-lodestar.mjs   # the same recordings and lies given to Lodestar's light client
 ```
 
-The browser tests load `playwright-core` from `PLAYWRIGHT_DIR` (a `node_modules` directory), or from the directory they are run in. `tests/light-lodestar.mjs`, `tests/proof-live.mjs` and `tests/evm-fuzz.mjs` compare with other implementations, which are not dependencies of this repository: `LODESTAR_DIR`, `MPT_DIR` and `EVM_DIR` name directories where they were installed with `npm install`.
+With `VIEW_HOST=<host>` the browser tests run against a live host (`https://<label>.<host>/`) in place of the local build. They load `playwright-core` from `PLAYWRIGHT_DIR` (a `node_modules` directory), or from the directory they are run in. `tests/light-lodestar.mjs`, `tests/proof-live.mjs` and `tests/evm-fuzz.mjs` compare with other implementations, which are not dependencies of this repository: `LODESTAR_DIR`, `MPT_DIR` and `EVM_DIR` name directories where they were installed with `npm install`.

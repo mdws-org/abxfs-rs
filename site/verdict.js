@@ -73,4 +73,25 @@ function judgeComputed({ computed, atFinalized, headReply, headBlock, supporting
   return { state: 'proved', reason: `${atFinalized.length} endpoints return the same at ${at}, and the same now` };
 }
 
-export { judge, judgeComputed, judgeRollup };
+// A page a contract computes on a rollup, run here over the rollup's state at a block one of its claims on
+// Ethereum commits to. Endpoints seldom keep that block, so there may be nothing to compare with, and without a
+// comparison nothing catches a fault in this viewer's own EVM. So this never says "proved":
+//   recomputed   the reply computed here is the reply the page is made from, and no endpoint that answered at
+//                that block returned another (the reason says how many answered)
+//   differs      an endpoint returned another reply at that block
+//   agreed       not run, the call fails there, a supporting call did not come out the same, or the reply now is
+//                another: the page changed since, or this viewer computes it differently
+//   computed, supporting   as for judgeComputed;   atClaim   [[host, reply], ...] at the claim's block
+function judgeRollupComputed({ computed, atClaim, headReply, supporting = [] }) {
+  if (!computed?.done) return { state: 'agreed', reason: computed?.why || 'the page was not recomputed' };
+  const at = `block ${computed.block.number}`;
+  const other = atClaim.filter(([, reply]) => !computed.success || reply !== computed.output);
+  if (other.length) return { state: 'differs', reason: `at ${at} this viewer computes one reply and ${other.map(([host]) => host).join(', ')} return${other.length === 1 ? 's' : ''} another` };
+  if (computed.success === false) return { state: 'agreed', reason: `run here over the state of ${at}, the contract's call fails` };
+  if (headReply !== computed.output) return { state: 'agreed', reason: `the reply computed here at ${at} is not the reply the endpoints return now: the page changed since that block, or this viewer computes it differently, and no endpoint keeps that block to tell which` };
+  const shaky = supporting.find((s) => !s.ok);
+  if (shaky) return { state: 'agreed', reason: `the page itself was recomputed here at ${at}, but ${shaky.why}` };
+  return { state: 'recomputed', reason: atClaim.length ? `${atClaim.length} endpoint${atClaim.length === 1 ? '' : 's'} returned the same at ${at}` : `no endpoint answered at ${at}, so the result was not compared with any` };
+}
+
+export { judge, judgeComputed, judgeRollup, judgeRollupComputed };

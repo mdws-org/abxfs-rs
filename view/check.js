@@ -4,8 +4,8 @@ import { CHAINS, quantity, rpc } from './chain.js';
 import { hostLabel, parseHost, viewUrl } from './target.js';
 import { BEACONS, CHECKPOINTS } from './checkpoint.js';
 import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
-import { judge, judgeComputed, judgeRollup } from './verdict.js';
-import { baseClaims, baseTokenParam } from './base.js';
+import { judge, judgeComputed, judgeRollup, judgeRollupComputed } from './verdict.js';
+import { BASE_PROOF_ENDPOINTS, baseClaims, baseTokenParam } from './base.js';
 import { agreedTokenUri, generatorPage, readTokenUri, repliesAt } from './token.js';
 import { ROLLUPS as ARBITRUM, confirmed, rollupTokenParam } from './arbitrum.js';
 import { BUILD } from './files.js';
@@ -201,6 +201,7 @@ async function token(chain, target, head, openUrl) {
   $('#open').hidden = !openUrl;
   const how = read.field === 'generator' ? 'This is a code project. Its page is built by ABX\'s generator contract from the script the collection stores, when the contract is asked.' : 'This contract keeps its artwork in tokenURI, which the contract computes when asked.';
   const agreed = `${how} ${sources.length} endpoints return the same reply at block ${count(head.block)}, and the page is exactly what that reply holds.`;
+  if (RECOMPUTED_ON.has(chain.id)) return rollupToken(chain, target, head, { read, shown, got, agreed });
   const cp = CHECKPOINTS[chain.id];
   if (!cp || !PROOF_ENDPOINTS[chain.id]) return say('agreed', 'Agreed by the endpoints. Not proved.', `${agreed} No storage proof covers a computed reply, and this viewer has no light client for ${chain.name}.`);
   if (!await proofSwitch()) return say('agreed', 'Agreed by the endpoints. Proving is switched off.', `${agreed} The operator of this host has switched proving off, which is done when a fault is found in it.`);
@@ -244,6 +245,64 @@ async function token(chain, target, head, openUrl) {
   };
   const reason = v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.';
   say(v.state, texts[v.state], v.state === 'proved' ? `${how} This viewer ran that code itself over the state of a finalized block, each account and storage word read with a Merkle proof. ${reason} The page is exactly what that reply holds.${read.field === 'generator' && !read.complete ? ' It loads at least one library from an address off the chain, and nothing here covers what that address serves.' : ''}` : `${agreed} ${reason}`);
+}
+
+// A token page on a rollup: the contract's call is run here over the rollup's state at the block its newest claim
+// on Ethereum commits to (Base), or its latest confirmed assertion (Arbitrum One). Endpoints seldom keep that
+// block, so the result often cannot be compared, and the label is a weaker one of its own: never "proved".
+const RECOMPUTED_ON = new Set([8453, 42161]);
+async function rollupToken(chain, target, head, { read, shown, got, agreed }) {
+  const { name, l1, kind } = ROLLUPS[chain.id];
+  const cp = CHECKPOINTS[l1];
+  if (!await proofSwitch()) return say('agreed', 'Agreed by the endpoints. Proving is switched off.', `${agreed} The operator of this host has switched proving off, which is done when a fault is found in it.`);
+  say('working', 'Following Ethereum\'s sync committee to a finalized block…');
+  let computed = null, atClaim = [], final = true;
+  const supporting = [];
+  try {
+    const fin = await finalizedBlock({ chainId: l1, checkpoint: cp.root, beacons: BEACONS[l1] });
+    say('working', `Reading what ${name} has on Ethereum by proof…`);
+    let hash, urls, what;
+    if (kind === 'base') {
+      const claims = await baseClaims({ fin, urls: PROOF_ENDPOINTS[l1] });
+      const claim = claims.latest || claims.anchor;
+      final = !claims.latest;
+      hash = (await baseTokenParam({ claim, org: target.org, token: target.token, key: head.key })).block.hash;
+      urls = BASE_PROOF_ENDPOINTS;
+      what = `game ${claim.proxy}, ${final ? 'final on Ethereum' : 'the newest claim, not final'}`;
+    } else {
+      const claim = await confirmed({ fin, urls: PROOF_ENDPOINTS[l1], chainId: chain.id });
+      hash = claim.blockHash;
+      urls = ARBITRUM[chain.id].endpoints;
+      what = `assertion ${claim.assertion}, confirmed on Ethereum`;
+    }
+    say('working', 'Running the contract\'s code here, over that state…');
+    const run = (c) => computedAt({ chainId: chain.id, fin: { executionBlockHash: hash }, urls, ...c });
+    computed = await run(shown.call);
+    if (computed.done) atClaim = await repliesAt({ urls: [...urls, ...chain.rpcs], ...shown.call, blockHash: hash });
+    if (computed.done && computed.success && read.field === 'generator') {
+      // As on Ethereum, the two replies the choice of this page rested on are run here too.
+      const same = async (c, reply) => { const mine = await run(c); return mine.done && mine.success && mine.output === reply; };
+      supporting.push({ ok: await same(shown.status.call, shown.status.reply), why: 'the generator\'s status for this collection, which says the page is built on chain, was not recomputed to the same reply' });
+      supporting.push({ ok: Boolean(got) && await same(got.call, got.reply), why: got ? 'the token\'s own tokenURI, which holds no page, was not recomputed to the same reply' : 'the endpoints did not agree on the token\'s own tokenURI, so that it holds no page was not established' });
+    }
+    if (computed.done) {
+      fact('Run here at', `${name} block ${count(computed.block.number)}; ${what}`);
+      fact('State read by proof', `${count(computed.stats.accounts)} accounts, ${count(computed.stats.words)} storage words, ${count(computed.stats.codeBytes)} bytes of contract code, served by ${computed.via} (checked here; not trusted)`);
+      fact('Endpoints at that block', atClaim.length ? atClaim.map(([h, r]) => `${h}: ${computed.success && r === computed.output ? 'the same reply' : 'another reply'}`).join('; ') : 'none keeps that block');
+    }
+  } catch (e) {
+    if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${agreed} ${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
+    computed = { done: false, why: `what ${name} has on Ethereum could not be read by proof: ${e.message || e}` };
+  }
+  fact('Starting block', `Ethereum slot ${count(cp.slot)}, ${cp.date}; trusted for 14 days`);
+  const v = judgeRollupComputed({ computed, atClaim, headReply: shown.reply, supporting });
+  const texts = {
+    recomputed: `Recomputed here from the state of ${name}'s ${kind === 'base' ? (final ? 'final claim' : 'newest claim') : 'confirmed assertion'} on Ethereum. Not proved.`,
+    differs: 'Warning: this viewer and an endpoint compute different pages. One of them is wrong.',
+    agreed: 'Agreed by the endpoints. Not proved.',
+  };
+  const reason = v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.';
+  say(v.state, texts[v.state], v.state === 'recomputed' ? `This viewer ran the contract's code itself over ${name}'s state at the block that ${kind === 'base' ? 'claim' : 'assertion'} commits to, each account and storage word read with a Merkle proof, and got the reply the page is made from. ${reason} With nothing or little to compare it with, a fault in this viewer's own code would not be caught, so this is not called proved.${final ? '' : ` The claim is not final and can still be challenged.`}` : `${agreed} ${reason}`);
 }
 
 // A rollup: which of its claims on Ethereum the current root matches.

@@ -116,6 +116,19 @@ function provedState({ urls, stateRoot, at }) {
   };
 }
 
+// Chains other than Ethereum, where this EVM's rules are Ethereum's and nothing more is known to hold. What
+// could differ is refused, so that a run ends as not run and never as another chain's answer.
+//   refused   opcodes: CLZ everywhere (a chain may not have it yet); on Arbitrum also the ones that read the
+//             block, which mean other things there (NUMBER is Ethereum's block number, for one)
+//   builtIn   addresses where the chain keeps contracts of its own (Arbitrum: 0x64 to 0xff)
+const CLZ = 0x1e, BLOCK_OPCODES = [0x41, 0x43, 0x44, 0x45, 0x48];
+const OTHER_CHAINS = {
+  8453: { refused: new Set([CLZ]) }, 84532: { refused: new Set([CLZ]) },
+  42161: { refused: new Set([CLZ, ...BLOCK_OPCODES]), builtIn: (address) => address >= 0x64n && address <= 0xffn },
+  421614: { refused: new Set([CLZ, ...BLOCK_OPCODES]), builtIn: (address) => address >= 0x64n && address <= 0xffn },
+};
+const ETHEREUM = new Set([1, 11155111]);
+
 // Run a view call over proved state at the block a proved header describes.
 //   header   from executionHeader(): { stateRoot, number, timestamp, coinbase, gasLimit, baseFee, prevRandao }
 //   urls     endpoints that serve proofs at that block; each request goes to the next when one fails
@@ -123,7 +136,8 @@ function provedState({ urls, stateRoot, at }) {
 // will not run the call, and ProvedError when no endpoint gave state that checks.
 async function provedCall({ chainId, header, urls, to, data, onFail, state = null }) {
   const at = '0x' + header.number.toString(16);
-  const env = { chainId, number: header.number, timestamp: header.timestamp, baseFee: header.baseFee, prevRandao: header.prevRandao, coinbase: header.coinbase, gasLimit: header.gasLimit, onFail };
+  if (!ETHEREUM.has(chainId) && !OTHER_CHAINS[chainId]) throw new EvmError('unsupported', `this viewer's EVM does not run calls on chain ${chainId}`);
+  const env = { ...OTHER_CHAINS[chainId], chainId, number: header.number, timestamp: header.timestamp, baseFee: header.baseFee, prevRandao: header.prevRandao, coinbase: header.coinbase, gasLimit: header.gasLimit, onFail };
   // `state` from an earlier call at the same block may be given: what it proved is not fetched again.
   if (!state || state.stateRoot !== header.stateRoot) state = provedState({ urls, stateRoot: header.stateRoot, at });
   // The hint may come from any endpoint that gives one; not every endpoint has the method. A few are tried.
@@ -141,12 +155,13 @@ async function provedCall({ chainId, header, urls, to, data, onFail, state = nul
   return { ...result, gasUsed: callGas(CALL_GAS, bytes) - result.gasLeft, state, stats: state.stats, via: [...state.stats.hosts].join(', ') };
 }
 
-// The same, at the finalized block `fin` names, in the form verdict.js judges: never throws.
+// The same, at the block whose hash `fin.executionBlockHash` is (Ethereum's finalized block, or a rollup's block
+// that a claim on Ethereum commits to), in the form verdict.js judges: never throws.
 // Returns { done: true, success, output (0x-hex), block: { number, hash }, stats, via } or { done: false, why }.
 async function computedAt({ chainId, fin, urls, to, data, state = null }) {
   let header = null, last = null;
   for (const url of urls) { try { header = await headerOf(url, fin.executionBlockHash); break; } catch (e) { last = e; } }
-  if (!header) return { done: false, why: `the finalized block's header could not be read: ${last ? last.message : 'no endpoint'}` };
+  if (!header) return { done: false, why: `the block's header could not be read: ${last ? last.message : 'no endpoint'}` };
   try {
     const r = await provedCall({ chainId, header, urls, to, data, state });
     return { done: true, success: r.success, output: toHex(r.output), state: r.state, block: { number: header.number, hash: fin.executionBlockHash }, stats: r.stats, via: r.via };

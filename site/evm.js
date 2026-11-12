@@ -120,6 +120,8 @@ async function message(m) {
   if (m.depth > MAX_DEPTH) return { success: false, output: new Uint8Array(0), gasLeft: m.gas };
   const pre = BigInt(m.codeAddress);
   if (pre === 0x100n) return unsupported('the precompiled contract at address 256 (P256VERIFY)');
+  // A chain may keep contracts of its own at low addresses, which are not code this EVM can run.
+  if (m.env.builtIn && m.env.builtIn(pre)) return unsupported(`a contract built into this chain, at address ${pre}`);
   if (pre >= 1n && pre <= 0x11n) {
     const p = PRECOMPILES[Number(pre)];
     if (!p) return unsupported(`the precompiled contract at address ${pre}`);
@@ -170,6 +172,8 @@ async function execute(m, code) {
     if (pc >= code.length) return { success: true, output: new Uint8Array(0), gasLeft: gas };
     op = code[pc++];
     try {
+      // An opcode that means something else on this chain, or that the chain may not have, ends the run.
+      if (env.refused && env.refused.has(op)) return unsupported(`opcode 0x${op.toString(16).padStart(2, '0')}, which this viewer does not run on this chain`);
       const fixed = COST[op];
       if (fixed > 0) { gas -= BigInt(fixed); if (gas < 0n) return fail('out of gas'); }
       if (op >= 0x60 && op <= 0x7f) { // PUSH1..PUSH32

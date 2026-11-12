@@ -41,6 +41,7 @@ jobs:
           set -e
           mkdir "$RUNNER_TEMP/evm" && (cd "$RUNNER_TEMP/evm" && npm init -y >/dev/null && npm install --ignore-scripts --no-audit --no-fund @ethereumjs/evm@10.1.3 @ethereumjs/common@10.1.3 @ethereumjs/util@10.1.3)
           EVM_DIR="$RUNNER_TEMP/evm" node tests/evm-fuzz.mjs 3000
+          node tests/evm-chains.mjs
           EVM_DIR="$RUNNER_TEMP/evm" node tests/evm-mutants.mjs
       - name: Verdict rule, then the rule for computed pages with each condition removed in turn
         run: node tests/verdict.mjs && node tests/verdict-mutants.mjs
