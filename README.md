@@ -168,7 +168,9 @@ The root of a BAMFS project is proved and compared like any other, with `bamfs.c
 
 Many ABX contracts keep their artwork in `tokenURI` and have no ABX FS root: image tokens, and code projects whose page the contract assembles from stored script. For those the viewer serves the token's own page at the same hostname (`site/token.js`). `tokenURI` (or `uri` on an ERC-1155 contract) is asked of every endpoint at one block. At least two must answer, and all that answer must return the same bytes. The reply must be a `data:` URI holding JSON. Its `animation_url`, when it is an HTML `data:` URI, is the page; otherwise its `image`, when it is an image `data:` URI, is. The page is exactly those bytes.
 
-When the metadata, or the art it names, is at an address off the chain, the viewer says where and shows nothing. It does not fetch it.
+A code project whose `tokenURI` points at a resolver still has its page on chain. ABX's generator contract (one per chain, `GENERATORS` in `site/token.js`) builds the page from the script the collection stores, the libraries it names and the token's data. When `tokenURI` holds no page, the viewer asks the generator for `onChainStatus(collection)` and `document(collection, token)` under the same agreement rule and serves that document. A document of a megabyte is more than some endpoints compute in one call, so the proof endpoints are asked as well when fewer than two of the usual ones answer. The check page says when the document loads a library the chain does not hold.
+
+When the metadata, the art it names, or a project's code is at an address off the chain, the viewer says where and shows nothing. It does not fetch it.
 
 A `tokenURI` reply is computed by the contract, so no storage proof covers it. The check page says "Agreed by the endpoints. Not proved." for a token page on every chain.
 

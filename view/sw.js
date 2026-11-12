@@ -18,7 +18,7 @@ import { BUILD, FILES } from './files.js';
 import { BEACONS, CHECKPOINTS } from './checkpoint.js';
 import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
 import { judge } from './verdict.js';
-import { agreedTokenUri, readTokenUri } from './token.js';
+import { agreedTokenUri, generatorPage, readTokenUri } from './token.js';
 import { readFile as bamfsRead, walk as bamfsWalk } from './bamfs.js';
 
 const TOKEN_PARAM = '0x6bd39222'; // tokenParam(uint256,bytes32)
@@ -490,7 +490,22 @@ function mismatchPage(request, e) {
 let tokenMemo = null; // { at, value: Promise<{ read, sources, block, hash }> }
 function tokenPage(block) {
   if (tokenMemo && Date.now() - tokenMemo.at < HEAD_TTL_MS) return tokenMemo.value;
-  const value = agreedTokenUri({ urls: chain.rpcs, org: target.org, token: target.token, block }).then((got) => ({ read: readTokenUri(got.bytes), sources: got.sources, block: got.block, hash: got.hash }));
+  const value = (async () => {
+    // tokenURI first: when the contract itself returns a page or an image, that is the token's page.
+    let page = null, why = null;
+    try {
+      const got = await agreedTokenUri({ urls: chain.rpcs, org: target.org, token: target.token, block });
+      page = { read: readTokenUri(got.bytes), sources: got.sources, block: got.block, hash: got.hash };
+    } catch (e) { if (e.kind !== 'rpc') throw e; why = e; }
+    if (page && page.read.kind === 'page') return page;
+    // Otherwise a code project's page is the document ABX's generator contract builds for it.
+    const made = await generatorPage({ chainId: chain.id, urls: chain.rpcs, more: PROOF_ENDPOINTS[chain.id] || [], org: target.org, token: target.token, block }).catch((e) => { if (e.kind !== 'rpc') throw e; return null; });
+    if (made && made.kind === 'page') return { read: made, sources: made.sources, block, hash: made.hash };
+    if (made && made.kind === 'unread') return { read: made, sources: [], block, hash: '' };
+    if (page) return made && made.kind === 'offchain' && page.read.kind !== 'offchain' ? { ...page, read: made } : page;
+    if (made && made.kind === 'offchain') return { read: made, sources: [], block, hash: '' };
+    throw why;
+  })();
   tokenMemo = { at: Date.now(), value };
   value.catch(() => { if (tokenMemo && tokenMemo.value === value) tokenMemo = null; });
   return value;
@@ -504,6 +519,7 @@ async function tokenAnswer(request, block, nothing) {
     return problem(request, 502, 'The chain’s answer did not check out', e.message || String(e));
   }
   const { read } = page;
+  if (read.kind === 'unread') return problem(request, 502, 'Could not reach the chain', read.why);
   if (read.kind === 'offchain') return problem(request, 404, 'This token’s artwork is not on chain', `The contract's tokenURI says its ${read.what} is at ${read.where}. This viewer shows only what is read from the chain.`);
   if (read.kind !== 'page') return problem(request, 404, 'Nothing here', `This project has nothing published in ABX FS, and its tokenURI holds nothing this viewer shows: ${read.why}.`);
   let path;
@@ -512,7 +528,7 @@ async function tokenAnswer(request, block, nothing) {
   return withRange(request, read.bytes, {
     'content-type': TEXT_TYPES.has(read.mime) ? `${read.mime}; charset=utf-8` : read.mime,
     'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'origin-agent-cluster': '?1',
-    'x-abxfs-token-uri': page.hash, 'x-abxfs-agreed': `${page.sources.join(', ')} at block ${page.block}`,
+    'x-abxfs-reply': page.hash, 'x-abxfs-from': read.field === 'generator' ? 'the generator contract\'s document' : `tokenURI ${read.field}`, 'x-abxfs-agreed': `${page.sources.join(', ')} at block ${page.block}`,
   });
 }
 

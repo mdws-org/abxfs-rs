@@ -4,33 +4,45 @@
 // usage: tools/build-view.py && tools/view-serve.py &   then   CHROME_PATH=... node tests/token-page.mjs
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-import { readTokenUri, abiString } from '../site/token.js';
+import { GENERATORS, readTokenUri, abiString } from '../site/token.js';
 const require = createRequire(process.env.PLAYWRIGHT_DIR || '/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
 const { chromium } = require('playwright-core');
 const port = process.argv[2] || '8853';
 const RPC = { 1: ['https://eth.drpc.org', 'https://rpc.mevblocker.io'], 8453: ['https://base.drpc.org', 'https://mainnet.base.org', 'https://base-mainnet.public.blastapi.io'] };
 const sha = (b) => createHash('sha256').update(b).digest('hex');
+const { keccak256 } = await import('../site/keccak-lookup.js');
+const DOCUMENT = Buffer.from(keccak256(new TextEncoder().encode('document(address,uint256)')).slice(0, 4)).toString('hex');
 // [name, chain, contract, token, what is expected]
 const CASES = [
   ['an on-chain script page (Desert Syntax)', 8453, 'c4b6048ee69d445dcb63795b89121b40f085738a', '0', 'text/html'],
   ['an SVG image token (z\'s wobbley sketches)', 1, 'ff75c6d3d76fea5fa19f9a14422a87ee88717b5f', '0', 'image/svg+xml'],
   ['a PNG image token', 8453, '68ad94208485ae803b5924eb73c241976f48dfd6', '0', 'image/png'],
-  ['a token whose metadata is at a resolver (FLOCK)', 8453, '1b28656ee5403d658298a7a41ba2c1944a0d9746', '0', 'offchain'],
+  // Code projects whose tokenURI points at a resolver: the page is the generator contract's document.
+  ['a code project behind a resolver (GAF Donor Tiles 2026)', 8453, '5ba6130666276b837e17344c73d89b4e45918d2a', '0', 'generator'],
+  ['a 286 KB code project behind a resolver (cc0py ABX site)', 1, '36a34158ad7ead3b8502585136e7add92e4fb8d3', '0', 'generator'],
+  ['a 1 MB code project behind a resolver (Marfa Light)', 1, '4504570d25b710942bee78b7ff5720950c1fc02d', '0', 'generator'],
+  ['a project whose code is a build on Arweave (FLOCK)', 8453, '1b28656ee5403d658298a7a41ba2c1944a0d9746', '0', 'offchain'],
   ['a token whose image is on Arweave', 8453, '2fc9645a31ade7fbeff9b30178fb66f2783292c9', '0', 'offchain'],
 ];
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || undefined });
 let bad = 0;
 for (const [name, chain, org, token, want] of CASES) {
   // The reference: tokenURI from one endpoint, decoded here.
+  // The reference: the same call from one endpoint, decoded here.
+  const one = async (to, data) => {
+    for (const url of RPC[chain]) {
+      try {
+        const res = await (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }) })).json();
+        if (typeof res.result === 'string' && res.result.length > 130) return abiString(res.result);
+      } catch { /* the next endpoint */ }
+    }
+    return null;
+  };
+  const w = (n) => BigInt(n).toString(16).padStart(64, '0');
   let ref;
-  for (const url of RPC[chain]) {
-    try {
-      const res = await (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: '0x' + org, data: '0xc87b56dd' + BigInt(token).toString(16).padStart(64, '0') }, 'latest'] }) })).json();
-      ref = readTokenUri(abiString(res.result));
-      break;
-    } catch { /* the next endpoint */ }
-  }
-  if (!ref) throw new Error(`no endpoint gave a reference tokenURI for ${org}`);
+  if (want === 'generator') { const doc = await one(GENERATORS[chain], '0x' + DOCUMENT + w('0x' + org) + w(token)); ref = doc ? { kind: 'page', bytes: doc } : null; }
+  else { const uri = await one('0x' + org, '0xc87b56dd' + w(token)); ref = uri ? readTokenUri(uri) : null; }
+  if (!ref) throw new Error(`no endpoint gave a reference for ${org}`);
   const label = `${chain}-${org}-${token}`;
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
@@ -52,7 +64,7 @@ for (const [name, chain, org, token, want] of CASES) {
     detail = `served ${got.status}; check page: ${verdict.state} "${verdict.text}"`;
   } else {
     const same = ref.kind === 'page' && sha(Buffer.from(got.bytes)) === sha(Buffer.from(ref.bytes));
-    ok = same && got.status === 200 && (got.type || '').startsWith(want) && other === 404 && verdict.state === 'agreed' && Boolean(got.agreed);
+    ok = same && got.status === 200 && (got.type || '').startsWith(want === 'generator' ? 'text/html' : want) && other === 404 && verdict.state === 'agreed' && Boolean(got.agreed);
     detail = `${got.bytes.length} bytes as ${got.type}, ${same ? 'equal to the reference' : 'DIFFERENT from the reference'}; another path ${other}; check page: ${verdict.state}; agreed by ${got.agreed}`;
   }
   bad += !ok;

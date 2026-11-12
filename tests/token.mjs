@@ -52,5 +52,29 @@ for (const [name, behave, want] of [
   ['one of three differs', { 'a.example': 'Y', 'b.example': 'X', 'c.example': 'X' }, 'check'],
   ['a 1155 contract: tokenURI reverts everywhere, uri answers', Object.fromEntries(urls.map((u) => [new URL(u).host, (params) => (params[0].data.startsWith('0x0e89341c') ? reply('U') : new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { message: 'execution reverted' } })))])), 'U from 3'],
 ]) { world(behave); const got = await agree(); check(got === want, `agreement: ${name}`, got); }
+// The generator contract's document, against made-up endpoints.
+{
+  const { keccak256 } = await import('../site/keccak-lookup.js');
+  const sel = (sig) => '0x' + Buffer.from(keccak256(new TextEncoder().encode(sig)).slice(0, 4)).toString('hex');
+  const STATUS = sel('onChainStatus(address)'), DOC = sel('document(address,uint256)');
+  const w = (n) => BigInt(n).toString(16).padStart(64, '0');
+  const status = (branch, complete, unresolved) => '0x' + w(branch) + w(complete) + w(128) + w(0) + w(unresolved);
+  const ok = (result) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+  const down = () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { message: 'out of gas' } }));
+  // behave: host -> { status, doc } where doc may be 'down'
+  const serve = (behave) => { globalThis.fetch = async (url, init) => { const b = behave[new URL(url).host]; const data = JSON.parse(init.body).params[0].data; if (!b) return down(); if (data.startsWith(STATUS)) return ok(b.status); if (data.startsWith(DOC)) return b.doc === 'down' ? down() : ok(abi(b.doc)); return down(); }; };
+  const page = async (more = []) => { try { const r = await T.generatorPage({ chainId: 1, urls: ['https://a.example', 'https://b.example'], more, org: '0x' + '11'.repeat(20), token: '0', block: 9 }); return r.kind === 'page' ? `page ${new TextDecoder().decode(r.bytes)} complete ${r.complete} from ${r.sources.length}` : `${r.kind}${r.where ? ' ' + r.where : ''}`; } catch (e) { return e.kind; } };
+  const T1 = status(1, 1, 0), HTML2 = '<!doctype html><p>doc</p>';
+  for (const [name, behave, more, want] of [
+    ['a script project, all on chain', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: HTML2 } }, [], `page ${HTML2} complete true from 2`],
+    ['a script project with a library kept elsewhere', { 'a.example': { status: status(1, 0, 1), doc: HTML2 }, 'b.example': { status: status(1, 0, 1), doc: HTML2 } }, [], `page ${HTML2} complete false from 2`],
+    ['a build kept at an address', { 'a.example': { status: status(2, 0, 0), doc: 'https://arweave.example/abc/' }, 'b.example': { status: status(2, 0, 0), doc: 'https://arweave.example/abc/' } }, [], 'offchain arweave.example'],
+    ['a contract with no code', { 'a.example': { status: status(0, 0, 0), doc: '' }, 'b.example': { status: status(0, 0, 0), doc: '' } }, [], 'none'],
+    ['the endpoints give different documents', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: HTML2 + '!' } }, [], 'check'],
+    ['the endpoints give different statuses', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: status(2, 0, 0), doc: HTML2 } }, [], 'check'],
+    ['one endpoint will not compute the document; a further endpoint will', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: 'down' }, 'c.example': { status: T1, doc: HTML2 } }, ['https://c.example'], `page ${HTML2} complete true from 2`],
+    ['too few endpoints will compute the document', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: 'down' } }, [], 'unread'],
+  ]) { serve(behave); const got = await page(more); check(got === want, `generator: ${name}`, got); }
+}
 console.log(bad ? `${bad} FAILED` : 'ok: all token cases');
 process.exit(bad ? 1 : 0);

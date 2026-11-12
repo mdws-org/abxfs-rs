@@ -77,20 +77,72 @@ function readTokenUri(uriBytes) {
   return { kind: 'none', why: 'the metadata names no page or image this viewer shows', name };
 }
 
-// tokenURI(token) as the endpoints agree on it at one block. `urls` are asked at once; `block` is a number.
-// Returns { bytes, sources, block, hash } or throws: 'rpc' when fewer than two answer, 'check' when they differ.
-async function agreedTokenUri({ urls, org, token, block }) {
+// One call as the endpoints agree on it at one block: `urls` are asked at once, at least two must answer, and all
+// that answer must return the same bytes. Returns { reply, sources } or throws 'rpc' / 'check'.
+async function agreedCall({ urls, to, data, block, what }) {
   const at = '0x' + block.toString(16);
-  const ask = async (selectorHex) => {
-    const all = await Promise.allSettled([...new Set(urls)].map(async (url) => [new URL(url).host, await call(url, 'eth_call', [{ to: org, data: selectorHex + word(token) }, at], 20_000, REPLY_BYTES)]));
-    return all.filter((a) => a.status === 'fulfilled' && typeof a.value[1] === 'string' && a.value[1].length > 2 + 128).map((a) => a.value);
-  };
-  let got = await ask(TOKEN_URI);
-  if (got.length < 2) got = await ask(URI);
-  if (got.length < 2) throw new ProvedError('rpc', `fewer than two endpoints returned a tokenURI at block ${block}`);
+  const all = await Promise.allSettled([...new Set(urls)].map(async (url) => [new URL(url).host, await call(url, 'eth_call', [{ to, data }, at], 30_000, REPLY_BYTES)]));
+  const got = all.filter((a) => a.status === 'fulfilled' && typeof a.value[1] === 'string' && a.value[1].length > 2).map((a) => a.value);
+  if (got.length < 2) throw new ProvedError('rpc', `fewer than two endpoints returned ${what} at block ${block}`);
   const hashes = got.map(([host, reply]) => [host, toHex(keccak256(new TextEncoder().encode(reply.toLowerCase())))]);
-  if (new Set(hashes.map(([, h]) => h)).size > 1) throw new ProvedError('check', `the endpoints return different tokenURIs at block ${block}: ${hashes.map(([host, h]) => `${host} ${h.slice(0, 12)}…`).join(', ')}`);
-  return { bytes: abiString(got[0][1]), sources: got.map(([host]) => host), block, hash: hashes[0][1] };
+  if (new Set(hashes.map(([, h]) => h)).size > 1) throw new ProvedError('check', `the endpoints return different replies for ${what} at block ${block}: ${hashes.map(([host, h]) => `${host} ${h.slice(0, 12)}…`).join(', ')}`);
+  return { reply: got[0][1], sources: got.map(([host]) => host), hash: hashes[0][1] };
 }
 
-export { abiString, agreedTokenUri, dataUri, readTokenUri };
+// tokenURI(token) as the endpoints agree on it at one block. `block` is a number.
+// Returns { bytes, sources, block, hash }.
+async function agreedTokenUri({ urls, org, token, block }) {
+  let got;
+  try { got = await agreedCall({ urls, to: org, data: TOKEN_URI + word(token), block, what: 'a tokenURI' }); } catch (e) {
+    if (e.kind !== 'rpc') throw e;
+    got = await agreedCall({ urls, to: org, data: URI + word(token), block, what: 'a tokenURI' }); // ERC-1155
+  }
+  if (got.reply.length <= 2 + 128) throw new ProvedError('rpc', `fewer than two endpoints returned a tokenURI at block ${block}`);
+  return { bytes: abiString(got.reply), sources: got.sources, block, hash: got.hash };
+}
+
+// ABX's generator contract, per chain (from @artblocks/abx-sdk 0.7.0, deployments). For a code project it
+// returns the page the project's script, its libraries and the token's data make: the same document the
+// project's resolver serves, built on chain from what the collection stores.
+const GENERATORS = {
+  1: '0xe55e694e2ef7d15d2e59d1778b911f27aaab99f9', 8453: '0x4f74de4835b51414a4da83527589aedc41a26fae', 42161: '0x53818b5d272e24be03358350fbe67fbee59ce239',
+  4663: '0x4f74de4835b51414a4da83527589aedc41a26fae', 11155111: '0x7fcf8118d400ff004ff0772a37c24196d9aa7b17', 84532: '0x05823fac69865f8a6c15c69d1cb8f10db87014e2', 421614: '0x53818b5d272e24be03358350fbe67fbee59ce239',
+};
+const ON_CHAIN_STATUS = selector('onChainStatus(address)'), DOCUMENT = selector('document(address,uint256)');
+const TEMPLATE = 1, DIRECTORY = 2; // the generator's branches: a script stored on chain, or a build kept at an address
+
+// A code project's page from the generator, as the endpoints agree on it.
+//   { kind: 'page', mime: 'text/html', bytes, complete, unresolved, sources, hash }   the document
+//   { kind: 'offchain', where, what: 'code' }       the project's code is a build at an address off the chain
+//   { kind: 'none', why }                            the contract is not a code project
+//   { kind: 'unread', why }                          a page exists on chain and too few endpoints returned it
+// `complete` false means the document names a library by address (a CDN) that the chain does not hold.
+async function generatorPage({ chainId, urls, more = [], org, token, block }) {
+  const generator = GENERATORS[chainId];
+  if (!generator) return { kind: 'none', why: 'no generator contract is known for this chain' };
+  const status = await agreedCall({ urls, to: generator, data: ON_CHAIN_STATUS + word(org), block, what: 'the generator\'s status' });
+  if (!/^0x([0-9a-f]{64}){5,}$/i.test(status.reply)) refuse('the generator\'s status is not what its interface says');
+  const at = (i) => BigInt('0x' + status.reply.slice(2 + 64 * i, 66 + 64 * i));
+  const branch = Number(at(0)), unresolved = Number(at(4));
+  if (branch !== TEMPLATE && branch !== DIRECTORY) return { kind: 'none', why: 'the contract holds no code' };
+  // A large document is more than some endpoints will compute in one call. `more` endpoints are asked only when
+  // fewer than two of the first answer.
+  const ask = (list) => agreedCall({ urls: list, to: generator, data: DOCUMENT + word(org) + word(token), block, what: 'the generator\'s document' });
+  let doc;
+  try { doc = await ask(urls); } catch (e) {
+    if (e.kind !== 'rpc') throw e;
+    try { doc = await ask([...urls, ...more]); } catch (e2) {
+      if (e2.kind !== 'rpc') throw e2;
+      return { kind: 'unread', why: 'the project\'s page is built on chain, but fewer than two endpoints returned it; it may be larger than they will compute in one call' };
+    }
+  }
+  const bytes = abiString(doc.reply);
+  if (branch === DIRECTORY) {
+    let where = 'an address off the chain';
+    try { where = new URL(new TextDecoder().decode(bytes).trim()).host || where; } catch { /* not an address this viewer can name */ }
+    return { kind: 'offchain', where, what: 'code' };
+  }
+  return { kind: 'page', mime: 'text/html', bytes, field: 'generator', complete: at(1) === 1n, unresolved, sources: doc.sources, hash: doc.hash };
+}
+
+export { GENERATORS, abiString, agreedCall, agreedTokenUri, dataUri, generatorPage, readTokenUri };

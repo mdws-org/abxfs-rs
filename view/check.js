@@ -6,7 +6,7 @@ import { BEACONS, CHECKPOINTS } from './checkpoint.js';
 import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
 import { judge, judgeRollup } from './verdict.js';
 import { baseClaims, baseTokenParam } from './base.js';
-import { agreedTokenUri, readTokenUri } from './token.js';
+import { agreedTokenUri, generatorPage, readTokenUri } from './token.js';
 import { ROLLUPS as ARBITRUM, confirmed, rollupTokenParam } from './arbitrum.js';
 import { BUILD } from './files.js';
 
@@ -144,23 +144,36 @@ async function run() {
   say(v.state, texts[v.state], v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.');
 }
 
-// No ABX FS root: what the contract's tokenURI holds, as the endpoints agree on it.
+// No ABX FS root: what the contract's tokenURI holds, or what ABX's generator contract builds for a code project,
+// as the endpoints agree on it.
 async function token(chain, target, head, openUrl) {
   $('#open').hidden = true;
-  say('working', 'No ABX FS root. Asking the endpoints for the token\'s own page (tokenURI)…');
-  let got;
-  try { got = await agreedTokenUri({ urls: chain.rpcs, org: target.org, token: target.token, block: head.block }); } catch (e) {
-    return e.kind === 'check' ? say('unreachable', 'The endpoints do not agree on this token.', e.message) : say('none', 'This project has nothing published.', 'It has no ABX FS root, and fewer than two endpoints returned a tokenURI for it.');
-  }
-  const read = readTokenUri(got.bytes);
-  fact('tokenURI', `${count(got.bytes.length)} bytes, the same from ${got.sources.join(', ')} at block ${count(got.block)}`);
+  say('working', 'No ABX FS root. Asking the endpoints for the token\'s own page…');
+  let got = null, read = { kind: 'none', why: 'fewer than two endpoints returned a tokenURI' };
+  try {
+    got = await agreedTokenUri({ urls: chain.rpcs, org: target.org, token: target.token, block: head.block });
+    read = readTokenUri(got.bytes);
+    fact('tokenURI', `${count(got.bytes.length)} bytes, the same from ${got.sources.join(', ')} at block ${count(got.block)}`);
+  } catch (e) { if (e.kind === 'check') return say('unreachable', 'The endpoints do not agree on this token.', e.message); }
   if (read.name) fact('Name in the metadata', read.name);
-  if (read.kind === 'offchain') return say('offchain', 'This token\'s artwork is not on chain.', `The contract's tokenURI says its ${read.what} is at ${read.where}. This viewer shows only what is read from the chain.`);
-  if (read.kind !== 'page') return say('none', 'This project has nothing published.', `It has no ABX FS root, and its tokenURI holds nothing this viewer shows: ${read.why}.`);
-  fact('Shown as', `${read.mime}, ${count(read.bytes.length)} bytes, from the metadata's ${read.field}`);
+  let sources = got ? got.sources : [];
+  if (read.kind !== 'page') {
+    // A code project: the document the generator contract builds from the script the collection stores.
+    const made = await generatorPage({ chainId: chain.id, urls: chain.rpcs, more: PROOF_ENDPOINTS[chain.id] || [], org: target.org, token: target.token, block: head.block }).catch((e) => (e.kind === 'check' ? { kind: 'none', why: e.message } : null));
+    if (made && made.kind === 'page') {
+      fact('Generator document', `${count(made.bytes.length)} bytes, the same from ${made.sources.join(', ')} at block ${count(head.block)}`);
+      fact('Libraries', made.complete ? 'every library the page loads is stored on chain' : `${made.unresolved || 'at least one'} library is named by address and loaded from there; the chain does not hold it`);
+      read = made; sources = made.sources;
+    } else if (made && made.kind === 'unread') return say('unreachable', 'The project\'s page could not be read.', made.why.charAt(0).toUpperCase() + made.why.slice(1) + '.');
+    else if (made && made.kind === 'offchain' && read.kind !== 'offchain') read = made;
+  }
+  if (read.kind === 'offchain') return say('offchain', 'This token\'s artwork is not on chain.', `The contract says its ${read.what} is at ${read.where}. This viewer shows only what is read from the chain.`);
+  if (read.kind !== 'page') return say('none', 'This project has nothing published.', `It has no ABX FS root, and nothing this viewer shows in its tokenURI or from the generator: ${read.why}.`);
+  fact('Shown as', read.field === 'generator' ? `${read.mime}, ${count(read.bytes.length)} bytes, the generator contract's document` : `${read.mime}, ${count(read.bytes.length)} bytes, from the metadata's ${read.field}`);
   $('#open-link').textContent = 'Open the token\'s page';
   $('#open').hidden = !openUrl;
-  say('agreed', 'Agreed by the endpoints. Not proved.', `This contract keeps its artwork in tokenURI, which the contract computes when asked. ${got.sources.length} endpoints return the same reply at block ${count(got.block)}, and the page is exactly what that reply holds. No storage proof covers a computed reply.`);
+  const how = read.field === 'generator' ? 'This is a code project. Its page is built by ABX\'s generator contract from the script the collection stores, when the contract is asked.' : 'This contract keeps its artwork in tokenURI, which the contract computes when asked.';
+  say('agreed', 'Agreed by the endpoints. Not proved.', `${how} ${sources.length} endpoints return the same reply at block ${count(head.block)}, and the page is exactly what that reply holds. No storage proof covers a computed reply.`);
 }
 
 // A rollup: which of its claims on Ethereum the current root matches.
