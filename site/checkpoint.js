@@ -2,8 +2,8 @@
 // which takes a finalized root only when two independent beacon nodes report the same one and the light client
 // can start from it. A root is trusted for 14 days (site/light.js); a build older than that stops claiming proof.
 export const CHECKPOINTS = {
-  1: { root: '0x8c5fc83200571c72083c73f3ca55b6f5111b011716e2867b27fabfe4353865c4', slot: 15634688, date: '2026-11-11' },
-  11155111: { root: '0xf54bd3575c05c7d83ee53dcef9bbfd98720b39e0be93aa9707a22dce8f2225d3', slot: 11558912, date: '2026-11-11' },
+  1: { root: '0x429b47af3de0b1c099adedcc08f939993e1a081f6513241f13c6738f95312c45', slot: 15640768, date: '2026-11-12' },
+  11155111: { root: '0xee6c50637284f95d12e9720c45e95d78bf196557c80f935c3fb149dce3725367', slot: 11564992, date: '2026-11-12' },
 };
 // Beacon API servers with CORS that serve the light-client routes. None is trusted: a wrong reply fails its
 // signature or its Merkle branch. More than one is listed so that one being down does not end proving.
