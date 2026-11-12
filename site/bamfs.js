@@ -187,7 +187,7 @@ async function walk(ctx, root) {
 
 // FastLZ level 1, to the end of the stream.
 function inflate(d, limit = MAX_FILE_BYTES) {
-  let out = new Uint8Array(Math.max(1024, d.length * 4)), o = 0;
+  let out = new Uint8Array(Math.max(1024, Math.min(d.length * 4, limit))), o = 0;
   const room = (n) => { if (o + n > limit) throw new LookupError('toolarge', `it inflates to more than ${MAX_FILE_BYTES / 1048576} MiB`); if (o + n > out.length) { const bigger = new Uint8Array(Math.max(out.length * 2, o + n)); bigger.set(out.subarray(0, o)); out = bigger; } };
   for (let i = 0; i < d.length;) {
     const c = d[i], t = c >> 5;

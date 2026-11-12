@@ -6,7 +6,7 @@ import { BEACONS, CHECKPOINTS } from './checkpoint.js';
 import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
 import { judge, judgeComputed, judgeRollup } from './verdict.js';
 import { baseClaims, baseTokenParam } from './base.js';
-import { TOKEN_URI, abiString, agreedTokenUri, generatorPage, readTokenUri, repliesAt } from './token.js';
+import { agreedTokenUri, generatorPage, readTokenUri, repliesAt } from './token.js';
 import { ROLLUPS as ARBITRUM, confirmed, rollupTokenParam } from './arbitrum.js';
 import { BUILD } from './files.js';
 
@@ -215,15 +215,14 @@ async function token(chain, target, head, openUrl) {
     computed = await computedAt({ chainId: chain.id, fin, urls: PROOF_ENDPOINTS[chain.id], ...shown.call });
     if (computed.done && computed.success && read.field === 'generator') {
       // The generator's document is shown because of two other replies: the generator's status for the collection,
-      // and a tokenURI that holds no page. Each is run here too, so that the choice does not rest on the endpoints.
-      const again = (c) => computedAt({ chainId: chain.id, fin, urls: PROOF_ENDPOINTS[chain.id], ...c }); // the worker keeps what it proved at this block
-      const status = await again(shown.status.call);
-      supporting.push({ ok: status.done && status.success && status.output === shown.status.reply, why: 'the generator\'s status for this collection, which says the page is built on chain, was not recomputed to the same reply' });
-      const uri = await again(got ? got.call : { to: target.org, data: TOKEN_URI + BigInt(target.token).toString(16).padStart(64, '0') });
-      let page = true;
-      if (uri.done && !uri.success) page = false;
-      else if (uri.done && (!got || uri.output === got.reply)) { try { page = readTokenUri(abiString(uri.output)).kind === 'page'; } catch { page = false; } }
-      supporting.push({ ok: !page, why: 'that the token\'s own tokenURI holds no page was not established here' });
+      // and a tokenURI that holds no page. Each is held to what the page itself is held to: run here to the reply
+      // the endpoints agreed on, and returned by at least two endpoints, and no other, at the finalized block.
+      const same = async (c, reply) => {
+        const [mine, theirs] = await Promise.all([computedAt({ chainId: chain.id, fin, urls: PROOF_ENDPOINTS[chain.id], ...c }), repliesAt({ urls: [...PROOF_ENDPOINTS[chain.id], ...chain.rpcs], ...c, blockHash: fin.executionBlockHash })]);
+        return mine.done && mine.success && mine.output === reply && theirs.length >= 2 && theirs.every(([, r]) => r === reply);
+      };
+      supporting.push({ ok: await same(shown.status.call, shown.status.reply), why: 'the generator\'s status for this collection, which says the page is built on chain, was not recomputed to the same reply' });
+      supporting.push({ ok: Boolean(got) && await same(got.call, got.reply), why: got ? 'the token\'s own tokenURI, which holds no page, was not recomputed to the same reply' : 'the endpoints did not agree on the token\'s own tokenURI, so that it holds no page was not established' });
     }
     if (computed.done) atFinalized = await repliesAt({ urls: [...PROOF_ENDPOINTS[chain.id], ...chain.rpcs], ...shown.call, blockHash: fin.executionBlockHash });
     if (computed.done) {

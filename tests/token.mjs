@@ -31,6 +31,8 @@ const CASES = [
   ['bad base64 in the image', meta({ image: 'data:image/png;base64,@@@' }), (r) => r.kind === 'none'],
   ['a PNG image as percent-encoded bytes that are not text', meta({ image: 'data:image/png,%89PNG%0D%0A%1A%0A' }), (r) => r.kind === 'page' && r.bytes.length === 8 && r.bytes[0] === 0x89 && r.bytes[7] === 0x0a],
   ['an SVG image with escapes and a percent sign of its own', meta({ image: 'data:image/svg+xml,%3Csvg width="100%" xmlns="http://www.w3.org/2000/svg"/%3E' }), (r) => r.kind === 'page' && text(r) === '<svg width="100%" xmlns="http://www.w3.org/2000/svg"/>'],
+  ['a base64 page whose + is percent-escaped', meta({ animation_url: 'data:text/html;base64,PGI%2BaGk8L2I%2B' }), (r) => r.kind === 'page' && text(r) === '<b>hi</b>'],
+  ['an on-chain image beside an animation at an ipfs address with no slashes', meta({ animation_url: 'ipfs:bafyabc', image: 'data:image/svg+xml;base64,' + b64(SVG) }), (r) => r.kind === 'offchain' && r.what === 'animation'],
   ['base64 named in capitals', meta({ image: 'data:image/svg+xml;BASE64,' + b64(SVG) }), (r) => r.kind === 'page' && text(r) === SVG],
   ['an on-chain image beside an animation at an address with no host name', meta({ animation_url: '//cdn.example/a.html', image: 'data:image/svg+xml;base64,' + b64(SVG) }), (r) => r.kind === 'offchain' && r.what === 'animation'],
   ['an image at a relative address', meta({ image: '/ipfs/bafyabc' }), (r) => r.kind === 'offchain' && r.what === 'image'],
@@ -69,7 +71,7 @@ for (const [name, behave, want] of [
   const ok = (result) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
   const down = () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { message: 'out of gas' } }));
   // behave: host -> { status, doc } where doc may be 'down'
-  const serve = (behave) => { globalThis.fetch = async (url, init) => { const b = behave[new URL(url).host]; const data = JSON.parse(init.body).params[0].data; if (!b) return down(); if (data.startsWith(STATUS)) return ok(b.status); if (data.startsWith(DOC)) return b.doc === 'down' ? down() : ok(abi(b.doc)); return down(); }; };
+  const serve = (behave) => { globalThis.fetch = async (url, init) => { const b = behave[new URL(url).host]; const data = JSON.parse(init.body).params[0].data; if (!b) return down(); if (data.startsWith(STATUS)) return ok(b.status); if (data.startsWith(DOC)) return b.doc === 'down' ? down() : b.doc === 'empty' ? ok('0x') : ok(abi(b.doc)); return down(); }; };
   const page = async (more = []) => { try { const r = await T.generatorPage({ chainId: 1, urls: ['https://a.example', 'https://b.example'], more, org: '0x' + '11'.repeat(20), token: '0', block: 9 }); return r.kind === 'page' ? `page ${new TextDecoder().decode(r.bytes)} complete ${r.complete} from ${r.sources.length}` : `${r.kind}${r.where ? ' ' + r.where : ''}`; } catch (e) { return e.kind; } };
   const T1 = status(1, 1, 0), HTML2 = '<!doctype html><p>doc</p>';
   for (const [name, behave, more, want] of [
@@ -82,6 +84,8 @@ for (const [name, behave, want] of [
     ['one endpoint will not compute the document; a further endpoint will', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: 'down' }, 'c.example': { status: T1, doc: HTML2 } }, ['https://c.example'], `page ${HTML2} complete true from 2`],
     ['one endpoint gives a document, the other will not; a further endpoint gives another document', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: 'down' }, 'c.example': { status: T1, doc: HTML2 + '!' } }, ['https://c.example'], 'check'],
     ['a further endpoint on a host already asked is not a second answer', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: 'down' } }, ['https://a.example/other'], 'unread'],
+    ['a further endpoint on another port of a host already asked is not a second answer', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: 'down' }, 'a.example:8443': { status: T1, doc: HTML2 } }, ['https://a.example:8443/x'], 'unread'],
+    ['the endpoints agree that the generator returns nothing', { 'a.example': { status: T1, doc: 'empty' }, 'b.example': { status: T1, doc: 'empty' } }, [], 'none'],
     ['too few endpoints will compute the document', { 'a.example': { status: T1, doc: HTML2 }, 'b.example': { status: T1, doc: 'down' } }, [], 'unread'],
   ]) { serve(behave); const got = await page(more); check(got === want, `generator: ${name}`, got); }
 }

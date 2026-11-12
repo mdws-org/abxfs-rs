@@ -13,7 +13,7 @@ const toHex = (u) => '0x' + Array.from(u, (b) => b.toString(16).padStart(2, '0')
 const word = (n) => BigInt(n).toString(16).padStart(64, '0');
 const GAS = '0x' + CALL_GAS.toString(16);
 // One endpoint for each host name, so that one host is not counted as two.
-const byHost = (urls) => [...new Map(urls.map((url) => [new URL(url).host, url])).values()];
+const byHost = (urls) => [...new Map(urls.map((url) => [new URL(url).hostname, url])).values()];
 const selector = (sig) => toHex(keccak256(new TextEncoder().encode(sig))).slice(0, 10);
 const TOKEN_URI = selector('tokenURI(uint256)'), URI = selector('uri(uint256)'); // ERC-721, ERC-1155
 const REPLY_BYTES = 12_000_000; // a metadata reply of a few megabytes is hex-encoded at twice its size
@@ -41,7 +41,7 @@ function dataUri(text) {
   if (!/^[a-z0-9][\w.+-]*\/[a-z0-9][\w.+-]*$/.test(mime)) return null;
   if (params.slice(1).some((p) => p.trim().toLowerCase() === 'base64')) {
     let bin;
-    try { bin = atob(payload); } catch { return null; }
+    try { bin = atob(payload.includes('%') ? decodeURIComponent(payload) : payload); } catch { return null; }
     return { mime, bytes: Uint8Array.from(bin, (c) => c.charCodeAt(0)) };
   }
   // Not base64: each %XX is one byte, whatever the bytes spell, and a % that is not followed by two hex digits is
@@ -99,11 +99,11 @@ async function agreedCall({ urls, more = [], to, data, block, what }) {
     .filter((a) => a.status === 'fulfilled' && typeof a.value[1] === 'string' && /^0x([0-9a-f]{2})*$/i.test(a.value[1])).map((a) => a.value);
   const first = byHost(urls);
   let got = await ask(first);
-  if (got.length < 2 && more.length) { const hosts = new Set(first.map((u) => new URL(u).host)); got = [...got, ...await ask(byHost(more).filter((u) => !hosts.has(new URL(u).host)))]; }
+  if (got.length < 2 && more.length) { const hosts = new Set(first.map((u) => new URL(u).hostname)); got = [...got, ...await ask(byHost(more).filter((u) => !hosts.has(new URL(u).hostname)))]; }
   if (got.length < 2) throw new ProvedError('rpc', `fewer than two endpoints returned ${what} at block ${block}`);
   const hashes = got.map(([host, reply]) => [host, toHex(keccak256(new TextEncoder().encode(reply.toLowerCase())))]);
   if (new Set(hashes.map(([, h]) => h)).size > 1) throw new ProvedError('check', `the endpoints return different replies for ${what} at block ${block}: ${hashes.map(([host, h]) => `${host} ${h.slice(0, 12)}…`).join(', ')}`);
-  if (got[0][1].length <= 2) throw new ProvedError('rpc', `the endpoints return nothing for ${what} at block ${block}`);
+  if (got[0][1].length <= 2) throw Object.assign(new ProvedError('rpc', `the endpoints return nothing for ${what} at block ${block}`), { empty: true });
   return { reply: got[0][1].toLowerCase(), sources: got.map(([host]) => host), hash: hashes[0][1], call: { to, data } };
 }
 
@@ -111,7 +111,7 @@ async function agreedCall({ urls, more = [], to, data, block, what }) {
 // that answered. One that does not know the hash, or whose call fails, gives an error and is left out.
 async function repliesAt({ urls, to, data, blockHash }) {
   const all = await Promise.allSettled(byHost(urls).map(async (url) => [new URL(url).host, await call(url, 'eth_call', [{ to, data, gas: GAS }, { blockHash }], 30_000, REPLY_BYTES)]));
-  return all.filter((a) => a.status === 'fulfilled' && typeof a.value[1] === 'string' && /^0x[0-9a-f]*$/i.test(a.value[1])).map((a) => [a.value[0], a.value[1].toLowerCase()]);
+  return all.filter((a) => a.status === 'fulfilled' && typeof a.value[1] === 'string' && /^0x([0-9a-f]{2})*$/i.test(a.value[1])).map((a) => [a.value[0], a.value[1].toLowerCase()]);
 }
 
 // tokenURI(token) as the endpoints agree on it at one block. `block` is a number.
@@ -155,6 +155,7 @@ async function generatorPage({ chainId, urls, more = [], org, token, block }) {
   let doc;
   try { doc = await agreedCall({ urls, more, to: generator, data: DOCUMENT + word(org) + word(token), block, what: 'the generator\'s document' }); } catch (e) {
     if (e.kind !== 'rpc') throw e;
+    if (e.empty) return { kind: 'none', why: 'the generator returns nothing for this token' };
     return { kind: 'unread', why: 'the project\'s page is built on chain, but fewer than two endpoints returned it; it may be larger than they will compute in one call' };
   }
   const bytes = abiString(doc.reply);

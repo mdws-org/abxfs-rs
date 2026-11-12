@@ -8,7 +8,7 @@ import { computedAt } from './evm-state.js';
 
 const states = new Map(); // finalized execution block hash -> proved state
 
-self.onmessage = async ({ data: { id, chainId, fin, urls, to, data } }) => {
+async function handle({ id, chainId, fin, urls, to, data }) {
   let result;
   try {
     const { state, ...rest } = await computedAt({ chainId, fin, urls, to, data, state: states.get(fin.executionBlockHash) || null });
@@ -16,4 +16,7 @@ self.onmessage = async ({ data: { id, chainId, fin, urls, to, data } }) => {
     result = { ...rest, stats: rest.stats && { requests: rest.stats.requests, accounts: rest.stats.accounts, words: rest.stats.words, codeBytes: rest.stats.codeBytes } };
   } catch (e) { result = { done: false, why: `the run ended with an error: ${e && e.message ? e.message : e}` }; }
   self.postMessage({ id, result });
-};
+}
+// One run at a time: runs share proved state and its limits.
+let last = Promise.resolve();
+self.onmessage = ({ data }) => { last = last.then(() => handle(data)); };

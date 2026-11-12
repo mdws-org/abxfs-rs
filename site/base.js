@@ -97,11 +97,11 @@ async function baseClaims({ fin, urls, deps = { provedAccount, provedCode } }) {
   // in the claimant's favour.
   // Anyone may add a game of another type to the list, so the newest of this type among the last few is taken.
   // When that one does not count, `latestWhy` says why.
-  let latest = null, latestWhy = '';
-  for (let back = 1n; back <= NEWEST_SEARCH && back <= count; back++) {
+  let latest = null, latestWhy = '', first = '', seen = 0n;
+  for (let back = 1n; back <= NEWEST_SEARCH && back <= count; back++, seen++) {
     const entry = BigInt((await read(FACTORY, ['0x' + word(BigInt(hash(word(104))) + count - back)])).words[0]);
-    if (Number(entry >> 224n) !== GAME_TYPE) { latestWhy = `none of the newest ${back} games in the factory's list is of the type Base uses`; continue; }
-    latestWhy = '';
+    if (Number(entry >> 224n) !== GAME_TYPE) { continue; }
+    if (addressOf(word(entry)) === anchor.proxy) break; // nothing older than the final claim can be newer than it
     try {
       const g = await game({ fin, urls, proxy: addressOf(word(entry)), retirementTimestamp, deps });
       if (g.status === STATUS.challengerWins) latestWhy = 'the newest game was resolved against its claim';
@@ -109,8 +109,10 @@ async function baseClaims({ fin, urls, deps = { provedAccount, provedCode } }) {
       else if (g.l2Block < anchor.l2Block) latestWhy = 'the newest game is for a block before the final one';
       else latest = g;
     } catch (e) { if (e.kind !== 'check') throw e; latestWhy = `the newest game was refused: ${e.message}`; }
-    break;
+    if (latest) break;
+    first ||= latestWhy;
   }
+  latestWhy = latest ? '' : first || `none of the newest ${seen} games in the factory's list is one of Base's type that counts`;
   return { l1Block: portal.block, anchor, latest, latestWhy };
 }
 

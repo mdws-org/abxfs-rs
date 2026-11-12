@@ -14,7 +14,7 @@ import { EvmError, callGas, run } from './evm.js';
 const toHex = (u) => '0x' + Array.from(u, (b) => b.toString(16).padStart(2, '0')).join('');
 const fromHex = (h) => Uint8Array.from(h.slice(2).match(/../g)?.map((x) => parseInt(x, 16)) ?? []);
 const PROOF_REPLY_BYTES = 12_000_000, MAX_REQUESTS = 600, SLOTS_PER_REQUEST = 200, AT_ONCE = 6;
-const HINT_ACCOUNTS = 256, HINT_WORDS = 4000, HINT_REQUESTS = 300; // what a hint may make this viewer fetch
+const HINT_ENDPOINTS = 3, HINT_ACCOUNTS = 256, HINT_WORDS = 4000, HINT_REQUESTS = 300; // what a hint may make this viewer fetch
 const MAX_MS = 120_000; // for all the requests of one call together
 
 // Run the jobs, a few at a time. The first failure is thrown once the jobs under way have ended.
@@ -31,13 +31,13 @@ async function pool(jobs, width) {
 function provedState({ urls, stateRoot, at }) {
   const accounts = new Map(), words = new Map(), codes = new Map();
   const stats = { requests: 0, accounts: 0, words: 0, codeBytes: 0, hosts: new Set() };
-  const deadline = Date.now() + MAX_MS;
-  let first = 0, cap = MAX_REQUESTS;
+  let deadline = Date.now() + MAX_MS, first = 0, cap = MAX_REQUESTS, used = 0;
   // Ask the endpoints in turn until `check` accepts a reply.
   async function ask(method, params, check) {
     let last = new ProvedError('rpc', 'no endpoint to ask for state');
     for (let n = 0, i = first; n < urls.length; n++, i = (i + 1) % urls.length) {
-      if (++stats.requests > cap || Date.now() > deadline) throw new EvmError('limit', 'the call touches more state than this viewer will fetch');
+      stats.requests++;
+      if (++used > cap || Date.now() > deadline) throw new EvmError('limit', 'the call touches more state than this viewer will fetch');
       try {
         const out = check(await call(urls[i], method, params, 12_000, PROOF_REPLY_BYTES));
         first = i; stats.hosts.add(new URL(urls[i]).host);
@@ -62,7 +62,9 @@ function provedState({ urls, stateRoot, at }) {
   });
   const account = async (address) => (accounts.has(address) ? accounts.get(address) : fetch(address, []));
   return {
-    stats,
+    stats, stateRoot,
+    // The limits on requests and on time are for one call: a call that uses state an earlier one proved starts afresh.
+    begin() { deadline = Date.now() + MAX_MS; used = 0; },
     // What the hint names is fetched a few accounts at a time, many words to a request, each account's code with it.
     // A hint is an endpoint's word: it may use only part of the requests a call is allowed, each account is taken
     // once, and a failure while following it is not the call's failure.
@@ -123,14 +125,17 @@ async function provedCall({ chainId, header, urls, to, data, onFail, state = nul
   const at = '0x' + header.number.toString(16);
   const env = { chainId, number: header.number, timestamp: header.timestamp, baseFee: header.baseFee, prevRandao: header.prevRandao, coinbase: header.coinbase, gasLimit: header.gasLimit, onFail };
   // `state` from an earlier call at the same block may be given: what it proved is not fetched again.
-  state ??= provedState({ urls, stateRoot: header.stateRoot, at });
-  // The hint may come from any endpoint that gives one; not every endpoint has the method.
-  for (const url of urls) {
-    const hint = await call(url, 'eth_createAccessList', [{ to, data }, at], 30_000, PROOF_REPLY_BYTES).catch(() => null);
-    if (!hint || !Array.isArray(hint.accessList)) continue;
-    await state.prefetch([{ address: to, storageKeys: [] }, ...hint.accessList]);
-    break;
+  if (!state || state.stateRoot !== header.stateRoot) state = provedState({ urls, stateRoot: header.stateRoot, at });
+  // The hint may come from any endpoint that gives one; not every endpoint has the method. A few are tried.
+  let hint = null;
+  for (const url of urls.slice(0, HINT_ENDPOINTS)) {
+    hint = await call(url, 'eth_createAccessList', [{ to, data, gas: '0x' + CALL_GAS.toString(16) }, at], 12_000, PROOF_REPLY_BYTES).catch(() => null);
+    if (hint && Array.isArray(hint.accessList)) break;
+    hint = null;
   }
+  state.begin();
+  // The contract called comes last, so that what the hint says about its storage is kept.
+  if (hint) await state.prefetch([...hint.accessList, { address: to, storageKeys: [] }]);
   const bytes = fromHex(data);
   const result = await run({ env, state, call: { to: to.toLowerCase(), data: bytes }, gas: callGas(CALL_GAS, bytes) });
   return { ...result, gasUsed: callGas(CALL_GAS, bytes) - result.gasLeft, state, stats: state.stats, via: [...state.stats.hosts].join(', ') };
