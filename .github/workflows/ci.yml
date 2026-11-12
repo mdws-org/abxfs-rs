@@ -14,6 +14,8 @@ jobs:
           node-version: 22
       - name: Vendored files match their checksums, and the viewer builds
         run: python3 tools/build-view.py
+      - name: Light client, official Merkle proof vectors
+        run: node tests/spec-vectors.mjs
       - name: Light client, recorded replies with planted lies
         run: node tests/light-replay.mjs
       - name: Light client, a chain whose keys the test holds

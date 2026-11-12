@@ -328,6 +328,7 @@ async function sync({ net, checkpoint, get, now = Date.now }) {
 }
 
 export {
+  EXECUTION_BLOCK_HASH_GINDEX_DENEB, EXECUTION_BLOCK_HASH_GINDEX_GLOAS, EXECUTION_PAYLOAD_GINDEX, GINDEX,
   LightError, MAX_CHECKPOINT_AGE_SLOTS, MAX_FINALIZED_AGE_SLOTS, NETWORKS,
   beaconBlockHeaderRoot, executionPayloadHeaderRoot, syncCommitteeRoot, is_valid_merkle_branch, is_valid_normalized_merkle_branch,
   is_valid_light_client_header, validate_light_client_update, compute_domain, compute_fork_version, sync,
