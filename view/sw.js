@@ -6,10 +6,18 @@
 // Nothing kept in the browser is trusted. A project's own scripts share this origin and can write its storage,
 // so the only things stored are raw chain replies, and every one of them passes the same checks as a fresh
 // reply each time it is used. Checked results live in this worker's memory only.
+//
+// On a chain this viewer has a light client for, a project's current root is also read by proof at the newest
+// finalized block and compared with what the endpoints give at that block. If the two differ, one of them is
+// wrong and nothing here can tell which, so the project is not shown. This origin states no verdict of its own:
+// a project's scripts could rewrite any words shown here. The verdict is on the check page, on another origin.
 
 import { CHAINS, LookupError, ZERO, fromHex, hash, host, quantity, readFile, rpc, walk, word } from './chain.js';
-import { gatewayUrl, parseHost } from './target.js';
+import { checkUrl, gatewayUrl, parseHost, viewUrl } from './target.js';
 import { BUILD, FILES } from './files.js';
+import { BEACONS, CHECKPOINTS } from './checkpoint.js';
+import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
+import { judge } from './verdict.js';
 
 const TOKEN_PARAM = '0x6bd39222'; // tokenParam(uint256,bytes32)
 const KEY_CID = '61627866732e636964'.padEnd(64, '0'); // "abxfs.cid"
@@ -212,7 +220,63 @@ async function askHead() {
   return { root: got[0].root, sources: got.map((g) => host(g.url)), block };
 }
 
-let head = null; // { root, sources, block, at, stale }
+/* ── proof ───────────────────────────────────────────────────────────────── */
+
+const PROOF_TTL_MS = 5 * 60_000; // finality moves about every six and a half minutes
+const PROOF_WAIT_MS = 20_000;
+
+// The host can turn proving off for every installed viewer by serving { "proof": false } here: a wrong proof
+// then stops nobody. It can only take the comparison away. A host that cannot be reached leaves proving on.
+let switchAt = 0, switchOn = true;
+async function proofAllowed() {
+  if (Date.now() - switchAt < PROOF_TTL_MS) return switchOn;
+  switchAt = Date.now();
+  try {
+    const r = await fetch(`${OWN}switch.json`, { cache: 'no-store' });
+    if (r.ok) switchOn = (await r.json()).proof !== false;
+  } catch { /* unreachable: unchanged */ }
+  return switchOn;
+}
+
+// The root read by proof at the newest finalized block, and what the endpoints give at that block.
+let proofMemo = null; // { at, value: Promise<{ proved, atFinalized }> }
+function prove() {
+  if (proofMemo && Date.now() - proofMemo.at < PROOF_TTL_MS) return proofMemo.value;
+  const value = (async () => {
+    const urls = PROOF_ENDPOINTS[chain.id];
+    const fin = await finalizedBlock({ chainId: chain.id, checkpoint: CHECKPOINTS[chain.id].root, beacons: BEACONS[chain.id] });
+    const proved = await provedTokenParam({ fin, urls, org: target.org, token: target.token });
+    const atFinalized = proved.known ? await tokenParamAt({ urls, org: target.org, token: target.token, block: proved.block.number }) : [];
+    return { proved, atFinalized };
+  })();
+  proofMemo = { at: Date.now(), value };
+  value.catch(() => { if (proofMemo && proofMemo.value === value) proofMemo = null; });
+  return value;
+}
+
+// Compare the agreed head with the proof. Throws only on a mismatch; a proof that cannot be had (no light
+// client for this chain, proving switched off, a server down, a shipped root past its 14 days) changes nothing
+// here, because this origin claims nothing. `deps` lets tests/settle.mjs supply made-up answers.
+async function settle(got, deps = { allowed: proofAllowed, prove }) {
+  if (!chain || !CHECKPOINTS[chain.id] || !PROOF_ENDPOINTS[chain.id]) return { state: 'agreed', reason: `no light client for ${chain ? chain.name : 'this chain'}` };
+  if (!await deps.allowed()) return { state: 'agreed', reason: 'proving is switched off on this host' };
+  let found;
+  try {
+    found = await Promise.race([deps.prove(), new Promise((_, no) => setTimeout(() => no(new Error('the proof took too long')), PROOF_WAIT_MS))]);
+  } catch (e) {
+    return { state: 'agreed', reason: `no proof: ${e.message || e}` };
+  }
+  const verdict = { ...judge({ ...found, agreedHead: got }), proved: found.proved, atFinalized: found.atFinalized };
+  if (verdict.state === 'mismatch') {
+    const e = new LookupError('mismatch', verdict.reason);
+    e.verdict = verdict;
+    e.agreed = got;
+    throw e;
+  }
+  return verdict;
+}
+
+let head = null; // { root, sources, block, at, stale, verdict }
 let asking = null;
 function currentRoot() {
   if (target.kind === 'root') return Promise.resolve(target.root);
@@ -220,9 +284,12 @@ function currentRoot() {
   asking ||= (async () => {
     try {
       const got = await askHead();
+      const verdict = await settle(got);
       if (got.root === ZERO) throw new LookupError('notfound', 'this project has nothing published');
-      head = { ...got, at: Date.now(), stale: false };
+      head = { ...got, at: Date.now(), stale: false, verdict: { state: verdict.state, reason: verdict.reason } };
     } catch (e) {
+      // A mismatch is never papered over with an earlier version.
+      if (e.kind === 'mismatch') { head = null; throw e; }
       // The endpoints cannot be reached: keep the version this worker last agreed on, marked as old.
       if (e.kind !== 'rpc' || !head) throw e;
       head = { ...head, at: Date.now() - HEAD_TTL_MS + 10_000, stale: true };
@@ -355,6 +422,28 @@ function problem(request, status, title, detail) {
   );
 }
 
+// The proof and the endpoints give different roots at one block. Both are shown, each openable by its own
+// fixed address, where every file is checked against that root and no "current" question arises.
+function mismatchPage(request, e) {
+  if (request.mode !== 'navigate') return new Response(`The proof and the endpoints disagree: ${e.message}`, { status: 502, headers: { 'content-type': 'text/plain; charset=utf-8', 'x-content-type-options': 'nosniff' } });
+  const { proved, atFinalized } = e.verdict;
+  const open = (root) => { const u = viewUrl({ kind: 'root', chainId: target.chainId, root }); return u ? ` <a href="${esc(u)}">Open this version by its fixed address</a>` : ''; };
+  const rows = atFinalized.map(([host_, root]) => `<li><span class="mono">${esc(root)}</span> from ${esc(host_)}${root === proved.root ? ' (the same as the proof)' : open(root)}</li>`).join('');
+  return new Response(
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<title>The proof and the endpoints disagree</title><link rel="stylesheet" href="${OWN}view.css">` +
+    `<main><h1>The proof and the endpoints disagree</h1>` +
+    `<p>This viewer read the project's current version two ways at block ${proved.block.number.toLocaleString('en-US')} of ${esc(chain.name)}, and got two answers. One of them is wrong, and nothing here can tell which, so the project is not shown.</p>` +
+    `<h2>By proof</h2><p><span class="mono">${esc(proved.root)}</span>, proved from Ethereum's sync committee (${proved.participants} of 512 signed) through ${esc(proved.via)}.${open(proved.root)}</p>` +
+    `<h2>From the endpoints, at the same block</h2><ul>${rows}</ul>` +
+    `<h2>From the endpoints, now</h2><p><span class="mono">${esc(e.agreed.root)}</span> at block ${e.agreed.block.toLocaleString('en-US')}, from ${esc(e.agreed.sources.join(', '))}.</p>` +
+    `<p>A version opened by its fixed address is checked file by file against that root, whichever you choose.</p>` +
+    (checkUrl(target) ? `<p><a href="${esc(checkUrl(target))}">Run the check again on the check page</a></p>` : '') +
+    `<p><a href="${OWN}info.html">What this viewer read and checked, and how to reset it</a></p></main>`,
+    { status: 502, headers: { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'content-security-policy': PAGE_CSP } },
+  );
+}
+
 const WHY = {
   rpc: [502, 'Could not reach the chain'],
   check: [502, 'The chain’s answer did not check out'],
@@ -405,6 +494,7 @@ async function answer(event) {
     if (!found) return new Response(request.method === 'HEAD' ? null : body, { status: 404, headers });
     return withRange(request, body, { ...headers, 'accept-ranges': 'bytes' });
   } catch (e) {
+    if (e.kind === 'mismatch') return mismatchPage(request, e);
     const [status, title] = WHY[e.kind] || [500, 'The viewer failed'];
     return problem(request, status, title, e.message || String(e));
   }
@@ -437,7 +527,7 @@ self.addEventListener('message', (event) => {
   event.waitUntil((async () => {
     await settingLoaded;
     const out = {
-      target, build: BUILD, files: FILES, custom: custom && host(custom),
+      target, build: BUILD, files: FILES, custom: custom && host(custom), check: target && target.kind === 'project' ? checkUrl(target) : null,
       chain: chain && { name: chain.name, id: chain.id, endpoints: chain.rpcs.map(host) },
     };
     try {
@@ -482,5 +572,5 @@ async function setEndpoint(value) {
   }
 }
 
-// For tests/head-rule.mjs, which runs the current-root rule against made-up endpoints.
-export { askHead };
+// For tests/head-rule.mjs and tests/settle.mjs, which run these rules against made-up answers.
+export { askHead, settle };

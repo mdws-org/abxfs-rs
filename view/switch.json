@@ -1,0 +1,1 @@
+{ "proof": true, "note": "Set proof to false to stop every installed viewer from comparing a project's root with a proof. Proving cannot be forced on from here." }

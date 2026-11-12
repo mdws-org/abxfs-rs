@@ -52,7 +52,16 @@ function viewUrl(t, here = globalThis.location) {
   return VIEW_BASE ? `https://${hostLabel(t)}.${VIEW_BASE}/` : null;
 }
 
+// The check page for a project: a page on its own hostname, which a project's scripts cannot reach, that reads the
+// project's current root by proof and by agreement and says what it found. The project is named after the "#".
+function checkUrl(t, here = globalThis.location) {
+  if (!t || t.kind !== 'project') return null;
+  const local = here && /^(localhost|127\.0\.0\.1|.*\.localhost)$/.test(here.hostname);
+  if (local) return `http://check.${LOCAL_VIEW}/#${hostLabel(t)}`;
+  return VIEW_BASE ? `https://check.${VIEW_BASE}/#${hostLabel(t)}` : null;
+}
+
 // The same project on ABX FS's own gateway, which names hosts the same way. A bare root has no address there.
 const gatewayUrl = (t) => (t && t.kind === 'project' ? `https://${hostLabel(t)}.abxfs.app/` : null);
 
-export { base32ToRoot, gatewayUrl, hostLabel, parseHost, rootToBase32, viewUrl };
+export { base32ToRoot, checkUrl, gatewayUrl, hostLabel, parseHost, rootToBase32, viewUrl };

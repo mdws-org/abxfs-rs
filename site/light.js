@@ -287,7 +287,7 @@ async function sync({ net, checkpoint, get, now = Date.now }) {
   const boot = (await get(`/eth/v1/beacon/light_client/bootstrap/${checkpoint}`))?.data || refuse('the bootstrap reply is empty');
   const header = parseHeader(boot.header, 'bootstrap header');
   if (!equal(beaconBlockHeaderRoot(header.beacon), root)) refuse('the bootstrap header is not the shipped block');
-  is_valid_light_client_header(net, header);
+  const shippedBlockHash = is_valid_light_client_header(net, header);
   const first = parseSyncCommittee(boot.current_sync_committee, 'bootstrap sync committee');
   const bootForm = GINDEX[formAt(net, header.beacon.slot)];
   if (!is_valid_normalized_merkle_branch(syncCommitteeRoot(first), branchOf(boot.current_sync_committee_branch, 'bootstrap sync committee branch'), bootForm.currentSyncCommittee, header.beacon.stateRoot)) refuse('the bootstrap sync committee is not in the shipped block\'s state');
@@ -316,10 +316,13 @@ async function sync({ net, checkpoint, get, now = Date.now }) {
   const committee = committees.get(periodAt(uint(raw.signature_slot, 'signature slot'))) || refuse('the finality update is signed in a period this client has no committee for');
   const u = validate_light_client_update(net, committee, raw, { finalized: true });
   if (u.signatureSlot > wallSlot + 1) refuse('the finality update is signed in the future by this device\'s clock');
-  if (u.finalized.beacon.slot < checkpointSlot) refuse('the finalized header is older than the shipped block');
-  if (wallSlot - u.finalized.beacon.slot > MAX_FINALIZED_AGE_SLOTS) throw new LightError('old', `the newest finalized block offered is ${wallSlot - u.finalized.beacon.slot} slots old`);
+  // Just after finality moves on, a server may still offer the finalized block before the shipped one. The
+  // shipped block is the starting point all of this rests on, so it is the newest finalized block known.
+  const shipped = u.finalized.beacon.slot < checkpointSlot;
+  const finalizedSlot = shipped ? checkpointSlot : u.finalized.beacon.slot;
+  if (wallSlot - finalizedSlot > MAX_FINALIZED_AGE_SLOTS) throw new LightError('old', `the newest finalized block offered is ${wallSlot - finalizedSlot} slots old`);
   return {
-    executionBlockHash: toHex(u.executionBlockHash), finalizedSlot: u.finalized.beacon.slot, attestedSlot: u.attested.beacon.slot,
+    executionBlockHash: toHex(shipped ? shippedBlockHash : u.executionBlockHash), finalizedSlot, attestedSlot: u.attested.beacon.slot,
     signatureSlot: u.signatureSlot, participants: u.participants, periods: target - periodAt(checkpointSlot), checkpointSlot,
   };
 }

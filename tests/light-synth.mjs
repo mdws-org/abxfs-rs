@@ -70,14 +70,15 @@ const first = (n) => Array.from({ length: n }, (_, i) => i);
 
 // The chain: a shipped block in period 3, one hand-over to period 4, and a finality update in period 4.
 const P = 8192;
-function chain({ signers = first(512), periodSigners = first(512), com0 = plain(1000), com1 = plain(5000), padBootstrap, padFinality, skipPeriod } = {}) {
-  const boot = header(3 * P + 100, com0.root, GI.current);
+function chain({ signers = first(512), periodSigners = first(512), com0 = plain(1000), com1 = plain(5000), padBootstrap, padFinality, skipPeriod, lateBoot } = {}) {
+  // `lateBoot`: the shipped block is in period 4, after the block the finality update names.
+  const boot = lateBoot ? header(4 * P + 352, com1.root, GI.current) : header(3 * P + 100, com0.root, GI.current);
   const turn = header(3 * P + 4000, com1.root, GI.next);
   const fin = header(4 * P + 320);
   const att = header(4 * P + 400, fin.root, GI.finalized);
   const pad = (branch, with_) => (with_ ? [with_, ...branch] : branch).map(hex);
   const replies = {
-    [`/eth/v1/beacon/light_client/bootstrap/${hex(boot.root)}`]: { data: { header: boot.json, current_sync_committee: com0.json, current_sync_committee_branch: pad(boot.stateBranch, padBootstrap) } },
+    [`/eth/v1/beacon/light_client/bootstrap/${hex(boot.root)}`]: { data: { header: boot.json, current_sync_committee: (lateBoot ? com1 : com0).json, current_sync_committee_branch: pad(boot.stateBranch, padBootstrap) } },
     '/eth/v1/beacon/light_client/updates?start_period=3&count=1': skipPeriod ? [] : [{ data: {
       attested_header: turn.json, next_sync_committee: com1.json, next_sync_committee_branch: turn.stateBranch.map(hex),
       sync_aggregate: sign(com0, turn, turn.beacon.slot + 1, periodSigners), signature_slot: String(turn.beacon.slot + 1),
@@ -87,7 +88,7 @@ function chain({ signers = first(512), periodSigners = first(512), com0 = plain(
       sync_aggregate: sign(com1, att, att.beacon.slot + 1, signers), signature_slot: String(att.beacon.slot + 1),
     } },
   };
-  return { replies, checkpoint: hex(boot.root), now: (net.genesisTime + (att.beacon.slot + 3) * 12) * 1000, want: hex(fin.blockHash) };
+  return { replies, checkpoint: hex(boot.root), now: (net.genesisTime + (att.beacon.slot + 3) * 12) * 1000, want: hex((lateBoot ? boot : fin).blockHash) };
 }
 const run = (c, now = c.now) => L.sync({ net, checkpoint: c.checkpoint, now: () => now, get: async (path) => c.replies[path] ?? null });
 
@@ -105,6 +106,7 @@ const CASES = [
   ['a branch padded with a zero entry, as a client upgraded across a fork sends it', () => chain({ padFinality: ZERO, padBootstrap: ZERO }), 'accept'],
   ['a finality branch padded with a non-zero entry', () => chain({ padFinality: rand32() }), 'check'],
   ['a bootstrap branch padded with a non-zero entry', () => chain({ padBootstrap: rand32() }), 'check'],
+  ['the server still offers the finalized block before the shipped one: the shipped block is used', () => chain({ lateBoot: true }), 'accept'],
   ['the hand-over update is withheld', () => chain({ skipPeriod: true }), 'check'],
   ['the shipped block is more than 14 days old', () => chain(), 'stale', (c) => c.now + 13.6 * 86_400_000],
   ['the newest finalized block is 257 slots old', () => chain(), 'old', (c) => c.now + (257 - 83) * 12_000],

@@ -12,8 +12,21 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 SITE, VIEW, OUT = HERE / "site", HERE / "view", HERE / "view-dist"
-OWN = ["boot.js", "sw.js", "info.html", "info.js", "view.css"]
-SHARED = ["chain.js", "keccak-lookup.js", "target.js"]
+OWN = ["boot.js", "sw.js", "info.html", "info.js", "check.html", "check.js", "view.css"]
+SHARED = ["chain.js", "keccak-lookup.js", "target.js", "light.js", "proof.js", "proved.js", "verdict.js", "checkpoint.js"]
+VENDOR = SITE / "vendor" / "noble"
+
+
+def vendored():
+    """The vendored files, each checked against SHA256SUMS: a file that was edited in place stops the build."""
+    out = []
+    for line in (VENDOR / "SHA256SUMS").read_text().splitlines():
+        want, rel = line.split("  ", 1)
+        f = VENDOR / rel
+        if hashlib.sha256(f.read_bytes()).hexdigest() != want:
+            raise SystemExit(f"site/vendor/noble/{rel} does not match SHA256SUMS; run tools/vendor-noble.py again")
+        out.append(rel)
+    return out
 
 
 def build():
@@ -26,10 +39,18 @@ def build():
         shutil.copyfile(VIEW / name, OUT / "_abxfs" / name)
     for name in SHARED:
         shutil.copyfile(SITE / name, OUT / "_abxfs" / name)
+    vendor = vendored()
+    for rel in vendor:
+        to = OUT / "_abxfs" / "vendor" / "noble" / rel
+        to.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(VENDOR / rel, to)
+    # The switch that turns proving off is the one file a host may change, so it is not part of the build's hashes.
+    shutil.copyfile(VIEW / "switch.json", OUT / "_abxfs" / "switch.json")
     # files.js: the SHA-256 of every file the viewer is made of, and one hash over that list. The worker imports
     # it to check its kept copies; the info page shows it, so a reader can compare a host with this repository.
     listed = {"/index.html": OUT / "index.html"}
     listed.update({f"/_abxfs/{name}": OUT / "_abxfs" / name for name in OWN + SHARED})
+    listed.update({f"/_abxfs/vendor/noble/{rel}": OUT / "_abxfs" / "vendor" / "noble" / rel for rel in vendor})
     sums = {path: hashlib.sha256(f.read_bytes()).hexdigest() for path, f in sorted(listed.items())}
     build_hash = hashlib.sha256("".join(f"{h}  {p}\n" for p, h in sums.items()).encode()).hexdigest()
     (OUT / "_abxfs" / "files.js").write_text(
