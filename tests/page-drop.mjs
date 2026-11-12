@@ -5,7 +5,7 @@
 import { createRequire } from 'node:module';
 import { readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
-const require = createRequire('/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
+const require = createRequire(process.env.PLAYWRIGHT_DIR || process.cwd() + '/'); // PLAYWRIGHT_DIR: a node_modules directory that holds playwright-core
 const { chromium } = require('playwright-core');
 const [url, folder, chain, width, shot] = process.argv.slice(2);
 

@@ -260,3 +260,5 @@ node tests/bamfs-live.mjs [dir]              # live: every file of four BAMFS pr
 node tests/check-page.mjs                    # live: the check page in a browser (needs tools/view-serve.py running)
 LODESTAR_DIR=<dir> node tests/light-lodestar.mjs   # the same recordings and lies given to Lodestar's light client
 ```
+
+The browser tests load `playwright-core` from `PLAYWRIGHT_DIR` (a `node_modules` directory), or from the directory they are run in. `tests/light-lodestar.mjs`, `tests/proof-live.mjs` and `tests/evm-fuzz.mjs` compare with other implementations, which are not dependencies of this repository: `LODESTAR_DIR`, `MPT_DIR` and `EVM_DIR` name directories where they were installed with `npm install`.

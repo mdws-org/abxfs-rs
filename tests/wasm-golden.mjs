@@ -1,8 +1,8 @@
 // The WebAssembly build must reproduce the reference outputs exactly, like the native build.
-// usage: node tests/wasm-golden.mjs   (from any directory; paths are absolute)
+// usage: node tests/wasm-golden.mjs   (from any directory; paths are taken from this file's place in the repository)
 import { readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
-const R = '/Users/bemeadows/Projects/.lanes/abxfs-rs';
+const R = join(new URL('.', import.meta.url).pathname, '..').replace(/\/$/, '');
 const { initSync, plan_files_json } = await import(`${R}/site/pkg/abxfs.js`);
 initSync({ module: readFileSync(`${R}/site/pkg/abxfs_bg.wasm`) });
 

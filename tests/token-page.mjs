@@ -6,7 +6,7 @@
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { GENERATORS, readTokenUri, abiString } from '../site/token.js';
-const require = createRequire(process.env.PLAYWRIGHT_DIR || '/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
+const require = createRequire(process.env.PLAYWRIGHT_DIR || process.cwd() + '/'); // PLAYWRIGHT_DIR: a node_modules directory that holds playwright-core
 const { chromium } = require('playwright-core');
 const port = process.argv[2] || '8853';
 const RPC = { 1: ['https://eth.drpc.org', 'https://rpc.mevblocker.io'], 8453: ['https://base.drpc.org', 'https://mainnet.base.org', 'https://base-mainnet.public.blastapi.io'] };

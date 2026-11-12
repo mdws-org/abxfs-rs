@@ -2,7 +2,7 @@
 // usage: tools/build-view.py && tools/view-serve.py &   then   CHROME_PATH=... node tests/check-page.mjs [port]
 //        CHECK_BASE=https://check.<host>/ CHROME_PATH=... node tests/check-page.mjs     the deployed page
 import { createRequire } from 'node:module';
-const require = createRequire(process.env.PLAYWRIGHT_DIR || '/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
+const require = createRequire(process.env.PLAYWRIGHT_DIR || process.cwd() + '/'); // PLAYWRIGHT_DIR: a node_modules directory that holds playwright-core
 const { chromium } = require('playwright-core');
 // CHECK_BASE names another check page, such as the deployed one: CHECK_BASE=https://check.fromchain.dynv6.net/
 const port = process.argv[2] || '8853';

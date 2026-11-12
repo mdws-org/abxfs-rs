@@ -27,7 +27,8 @@ const url = RPCS[which];
 const rpc = async (method, params) => { const r = await (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })).json(); if (r.error) throw new Error(`${method}: ${JSON.stringify(r.error)}`); return r.result; };
 const fb = (h) => Uint8Array.from(h.slice(2).match(/../g)?.map((x) => parseInt(x, 16)) ?? []);
 const hx = (u) => '0x' + Array.from(u, (b) => b.toString(16).padStart(2, '0')).join('');
-const require = createRequire((process.env.MPT_DIR || '/Users/bemeadows/Projects/.lanes/abxfs-p3-spike') + '/');
+if (!process.env.MPT_DIR) { console.log('set MPT_DIR to a directory where `npm install @ethereumjs/mpt` was run'); process.exit(2); }
+const require = createRequire(process.env.MPT_DIR + '/');
 const { verifyMerkleProof } = await import(require.resolve('@ethereumjs/mpt'));
 const { RLP } = await import(require.resolve('@ethereumjs/rlp'));
 
