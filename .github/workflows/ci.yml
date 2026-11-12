@@ -34,6 +34,8 @@ jobs:
         run: node tests/arbitrum-rules.mjs && node tests/arbitrum-mutants.mjs
       - name: Token pages, reading a tokenURI reply
         run: node tests/token.mjs
+      - name: BAMFS, recorded reads with lies, then each check removed in turn
+        run: node tests/bamfs-replay.mjs && node tests/bamfs-mutants.mjs
       - name: Verdict rule
         run: node tests/verdict.mjs
       - name: Current-root rule and the stop-on-mismatch rule

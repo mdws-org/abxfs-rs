@@ -156,6 +156,14 @@ A verdict on Base never stops a page. A claim that is not final rests on Base's 
 
 Proofs at the anchor's Base block need an endpoint that keeps state for 5 days. One public endpoint was found that does (`BASE_PROOF_ENDPOINTS` in `site/base.js`). If it does not answer, the anchor comparison is not made and the check page says so.
 
+### BAMFS projects
+
+BAMFS is the file store ABX FS grew out of. A project published to it keeps its root in the token parameter `bamfs.cid`, and its files in older store contracts that the ABX FS stores do not know. BAMFS's own gateway no longer serves them.
+
+When a token has no `abxfs.cid`, the viewer reads `bamfs.cid` under the same agreement rule, and `site/bamfs.js` reads the tree. It covers both generations of the store. The second generation (FileStoreV2, DirectoryStoreV2) keeps directories and files as trees of nodes; the first keeps flat lists. In both, every reply is checked back to the root: node ids, directory and file CIDs, chunk hashes, and for a compressed file the hash of its decoded bytes. Which generation a root belongs to is settled by which store knows it and then by the hashes. A fixed-root address (`r<chain id>-<root>`) works for a BAMFS root as well.
+
+The root of a BAMFS project is proved and compared like any other, with `bamfs.cid` as the parameter that is read.
+
 ### Token pages
 
 Many ABX contracts keep their artwork in `tokenURI` and have no ABX FS root: image tokens, and code projects whose page the contract assembles from stored script. For those the viewer serves the token's own page at the same hostname (`site/token.js`). `tokenURI` (or `uri` on an ERC-1155 contract) is asked of every endpoint at one block. At least two must answer, and all that answer must return the same bytes. The reply must be a `data:` URI holding JSON. Its `animation_url`, when it is an HTML `data:` URI, is the page; otherwise its `image`, when it is an image `data:` URI, is. The page is exactly those bytes.
@@ -206,6 +214,8 @@ node tests/proof-replay.mjs     # recorded proofs from four chains, RLP cases, h
 node tests/proof-mutants.mjs    # proof.js with one check removed at a time
 node tests/verdict.mjs          # the verdict table
 node tests/token.mjs            # reading a tokenURI reply, and the agreement rule against made-up endpoints
+node tests/bamfs-replay.mjs     # recorded reads of both BAMFS generations, then altered and targeted lies; FastLZ cases
+node tests/bamfs-mutants.mjs    # bamfs.js with one check removed at a time
 node tests/base-rules.mjs       # each rule for Base's contracts on Ethereum, against a made-up state
 node tests/base-replay.mjs      # a recorded read on Base at a claim's block, then one digit changed in every reply
 node tests/base-mutants.mjs     # base.js with one rule removed at a time
@@ -217,6 +227,7 @@ node tests/proved-live.mjs                   # live: a project's root by proof t
 node tests/base-live.mjs                     # live: Base's anchor and newest claims, and a project's root at each
 node tests/arbitrum-live.mjs                 # live: the confirmed assertion of Arbitrum One and Robinhood Chain
 node tests/token-page.mjs                    # live: token pages in a browser equal an independent read of tokenURI
+node tests/bamfs-live.mjs [dir]              # live: every file of four BAMFS projects, checked to the root; writes them to dir
 node tests/check-page.mjs                    # live: the check page in a browser (needs tools/view-serve.py running)
 LODESTAR_DIR=<dir> node tests/light-lodestar.mjs   # the same recordings and lies given to Lodestar's light client
 ```

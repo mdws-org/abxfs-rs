@@ -12,6 +12,7 @@ import { BUILD } from './files.js';
 
 const $ = (s) => document.querySelector(s);
 const ZERO = '0x' + '0'.repeat(64);
+const KEY_ABXFS = '61627866732e636964'.padEnd(64, '0'), KEY_BAMFS = '62616d66732e636964'.padEnd(64, '0'); // "abxfs.cid", "bamfs.cid"
 const MAX_LAG = { 1: 10, 11155111: 10, 8453: 60, 42161: 480, 4663: 1200 };
 // Rollups whose claims on Ethereum this viewer can read, and the chain those claims are on.
 const ROLLUPS = { 8453: { name: 'Base', l1: 1, kind: 'base' }, 42161: { name: 'Arbitrum One', l1: 1, kind: 'arbitrum' }, 4663: { name: 'Robinhood Chain', l1: 1, kind: 'arbitrum' } };
@@ -46,19 +47,28 @@ async function agreedHead(chain, target) {
   if (near.length < 2) throw new Error(`fewer than two endpoints for ${chain.name} are at the same height`);
   const block = Math.min(...near.map((u) => u.block));
   // A contract with no token parameters (an image token) reverts; that is an answer, recorded as the zero root.
-  const data = '0x6bd39222' + BigInt(target.token).toString(16).padStart(64, '0') + '61627866732e636964'.padEnd(64, '0');
-  const got = settled(await Promise.allSettled(near.map(async ({ url }) => {
-    let reply;
-    try { reply = await rpc(ctx(url), 'eth_call', [{ to: target.org, data }, '0x' + block.toString(16)]); } catch (e) {
-      if (/revert/i.test(e.message || '')) return [new URL(url).host, ZERO];
-      throw e;
-    }
-    if (typeof reply !== 'string' || reply.length < 66) throw new Error('tokenParam returned too little');
-    return [new URL(url).host, reply.slice(0, 66).toLowerCase()];
-  })));
-  if (got.length < 2) throw new Error(`fewer than two endpoints answered at block ${block}`);
-  if (new Set(got.map(([, root]) => root)).size > 1) throw new Error(`the endpoints disagree about this project's current version at block ${block}: ${got.map(([h, r]) => `${h} gives ${r}`).join(', ')}`);
-  return { root: got[0][1], block, sources: got.map(([h]) => h) };
+  const param = async (key) => {
+    const data = '0x6bd39222' + BigInt(target.token).toString(16).padStart(64, '0') + key;
+    const got = settled(await Promise.allSettled(near.map(async ({ url }) => {
+      let reply;
+      try { reply = await rpc(ctx(url), 'eth_call', [{ to: target.org, data }, '0x' + block.toString(16)]); } catch (e) {
+        if (/revert/i.test(e.message || '')) return [new URL(url).host, ZERO];
+        throw e;
+      }
+      if (typeof reply !== 'string' || reply.length < 66) throw new Error('tokenParam returned too little');
+      return [new URL(url).host, reply.slice(0, 66).toLowerCase()];
+    })));
+    if (got.length < 2) throw new Error(`fewer than two endpoints answered at block ${block}`);
+    if (new Set(got.map(([, root]) => root)).size > 1) throw new Error(`the endpoints disagree about this project's current version at block ${block}: ${got.map(([h, r]) => `${h} gives ${r}`).join(', ')}`);
+    return got;
+  };
+  let got = await param(KEY_ABXFS), key = KEY_ABXFS;
+  // No ABX FS root: the project may have been published to BAMFS, whose root is kept under another name.
+  if (got[0][1] === ZERO) {
+    const older = await param(KEY_BAMFS).catch(() => null);
+    if (older && older[0][1] !== ZERO) { got = older; key = KEY_BAMFS; }
+  }
+  return { root: got[0][1], block, sources: got.map(([h]) => h), key };
 }
 
 async function proofSwitch() {
@@ -87,6 +97,7 @@ async function run() {
   let head;
   try { head = await agreedHead(chain, target); } catch (e) { return say('unreachable', 'The endpoints could not be read.', e.message); }
   fact('Root from the endpoints, now', head.root, true);
+  if (head.key === KEY_BAMFS) fact('Published to', 'BAMFS, the file store before ABX FS (the token parameter "bamfs.cid")');
   fact('Agreed by', `${head.sources.join(', ')} at block ${count(head.block)}`);
   if (head.root === ZERO) return token(chain, target, head, openUrl);
   $('#open').hidden = !openUrl;
@@ -101,8 +112,8 @@ async function run() {
   try {
     const fin = await finalizedBlock({ chainId: chain.id, checkpoint: cp.root, beacons: BEACONS[chain.id] });
     say('working', 'Reading the project\'s root by proof…');
-    const proved = await provedTokenParam({ fin, urls: PROOF_ENDPOINTS[chain.id], org: target.org, token: target.token });
-    const atFinalized = proved.known ? await tokenParamAt({ urls: [...PROOF_ENDPOINTS[chain.id], ...chain.rpcs], org: target.org, token: target.token, blockHash: proved.block.hash }) : [];
+    const proved = await provedTokenParam({ fin, urls: PROOF_ENDPOINTS[chain.id], org: target.org, token: target.token, key: head.key });
+    const atFinalized = proved.known ? await tokenParamAt({ urls: [...PROOF_ENDPOINTS[chain.id], ...chain.rpcs], org: target.org, token: target.token, blockHash: proved.block.hash, key: head.key }) : [];
     found = { proved, atFinalized };
   } catch (e) {
     fact('Starting block', `slot ${count(cp.slot)}, ${cp.date}`);
@@ -170,14 +181,14 @@ async function rollup(chain, target, head) {
       settled = claims.anchor && { ...claims.anchor, what: `game ${claims.anchor.proxy}` };
       newest = claims.latest && { ...claims.latest, what: `game ${claims.latest.proxy}` };
       say('working', `Reading the project's root on ${name} at the blocks those claims name…`);
-      const at = (claim) => (claim ? baseTokenParam({ claim, org: target.org, token: target.token }).catch(unread(`block ${claim.l2Block}`)) : null);
+      const at = (claim) => (claim ? baseTokenParam({ claim, org: target.org, token: target.token, key: head.key }).catch(unread(`block ${claim.l2Block}`)) : null);
       [anchor, latest] = await Promise.all([at(claims.anchor), at(claims.latest)]);
     } else {
       const claim = await confirmed({ fin, urls: PROOF_ENDPOINTS[l1], chainId: chain.id });
       l1Block = claim.l1Block;
       settled = { ...claim, what: `assertion ${claim.assertion}` };
       say('working', `Reading the project's root on ${name} at the block that assertion commits to…`);
-      anchor = await rollupTokenParam({ claim, chainId: chain.id, org: target.org, token: target.token }).catch(unread(`block ${claim.blockHash}`));
+      anchor = await rollupTokenParam({ claim, chainId: chain.id, org: target.org, token: target.token, key: head.key }).catch(unread(`block ${claim.blockHash}`));
     }
   } catch (e) {
     fact('Starting block', `Ethereum slot ${count(cp.slot)}, ${cp.date}`);

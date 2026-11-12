@@ -19,9 +19,11 @@ import { BEACONS, CHECKPOINTS } from './checkpoint.js';
 import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
 import { judge } from './verdict.js';
 import { agreedTokenUri, readTokenUri } from './token.js';
+import { readFile as bamfsRead, walk as bamfsWalk } from './bamfs.js';
 
 const TOKEN_PARAM = '0x6bd39222'; // tokenParam(uint256,bytes32)
 const KEY_CID = '61627866732e636964'.padEnd(64, '0'); // "abxfs.cid"
+const KEY_BAMFS = '62616d66732e636964'.padEnd(64, '0'); // "bamfs.cid": a project published to BAMFS, before ABX FS
 const HEAD_TTL_MS = 60_000;
 // About two minutes of blocks on each chain: how far an endpoint may be from the middle one.
 const MAX_LAG_BLOCKS = { 1: 10, 8453: 60, 84532: 60, 42161: 480, 421614: 480, 4663: 1200, 11155111: 10 };
@@ -210,22 +212,32 @@ async function askHead() {
   if (near.length < 2) throw new LookupError('rpc', `fewer than two endpoints for ${chain.name} are at the same height, and a project's current version needs two that agree`);
   up.splice(0, up.length, ...near);
   const block = Math.min(...up.map((u) => u.block));
-  const data = TOKEN_PARAM + word(BigInt(target.token)) + KEY_CID;
+  // One token parameter from every endpoint at that block: at least two must answer, and all must agree.
   // A contract with no token parameters (an image token) reverts. A revert is an answer, and it is recorded as
   // the zero root, "nothing published": the token may still have a page of its own in tokenURI.
-  const got = settled(await Promise.allSettled(up.map(async ({ url }) => {
-    let reply;
-    try { reply = await rpc(ctxFor(url), 'eth_call', [{ to: target.org, data }, '0x' + block.toString(16)]); } catch (e) {
-      if (e.kind === 'rpc' && /revert/i.test(e.message || '')) return { url, root: ZERO };
-      throw e;
-    }
-    const res = fromHex(reply);
-    if (res.length < 32) throw new LookupError('check', 'tokenParam returned too little');
-    return { url, root: '0x' + Array.from(res.subarray(0, 32), (x) => x.toString(16).padStart(2, '0')).join('') };
-  })));
-  if (got.length < 2) throw new LookupError('rpc', `fewer than two endpoints answered at block ${block}`);
-  if (new Set(got.map((g) => g.root)).size > 1) throw new LookupError('check', `the endpoints disagree about this project's current version at block ${block} (${got.map((g) => host(g.url)).join(', ')})`);
-  return { root: got[0].root, sources: got.map((g) => host(g.url)), block };
+  const param = async (key) => {
+    const data = TOKEN_PARAM + word(BigInt(target.token)) + key;
+    const got = settled(await Promise.allSettled(up.map(async ({ url }) => {
+      let reply;
+      try { reply = await rpc(ctxFor(url), 'eth_call', [{ to: target.org, data }, '0x' + block.toString(16)]); } catch (e) {
+        if (e.kind === 'rpc' && /revert/i.test(e.message || '')) return { url, root: ZERO };
+        throw e;
+      }
+      const res = fromHex(reply);
+      if (res.length < 32) throw new LookupError('check', 'tokenParam returned too little');
+      return { url, root: '0x' + Array.from(res.subarray(0, 32), (x) => x.toString(16).padStart(2, '0')).join('') };
+    })));
+    if (got.length < 2) throw new LookupError('rpc', `fewer than two endpoints answered at block ${block}`);
+    if (new Set(got.map((g) => g.root)).size > 1) throw new LookupError('check', `the endpoints disagree about this project's current version at block ${block} (${got.map((g) => host(g.url)).join(', ')})`);
+    return got;
+  };
+  let got = await param(KEY_CID), key = KEY_CID;
+  // No ABX FS root: the project may have been published to BAMFS, whose root is kept under another name.
+  if (got[0].root === ZERO) {
+    const older = await param(KEY_BAMFS).catch(() => null);
+    if (older && older[0].root !== ZERO) { got = older; key = KEY_BAMFS; }
+  }
+  return { root: got[0].root, sources: got.map((g) => host(g.url)), block, key };
 }
 
 /* ── proof ───────────────────────────────────────────────────────────────── */
@@ -249,18 +261,18 @@ async function proofAllowed() {
 }
 
 // The root read by proof at the newest finalized block, and what the endpoints give at that block.
-let proofMemo = null; // { at, value: Promise<{ proved, atFinalized }> }
-function prove() {
-  if (proofMemo && Date.now() - proofMemo.at < PROOF_TTL_MS) return proofMemo.value;
+let proofMemo = null; // { at, key, value: Promise<{ proved, atFinalized }> }
+function prove(key = KEY_CID) {
+  if (proofMemo && proofMemo.key === key && Date.now() - proofMemo.at < PROOF_TTL_MS) return proofMemo.value;
   const value = (async () => {
     const urls = PROOF_ENDPOINTS[chain.id];
     const fin = await finalizedBlock({ chainId: chain.id, checkpoint: CHECKPOINTS[chain.id].root, beacons: BEACONS[chain.id] });
-    const proved = await provedTokenParam({ fin, urls, org: target.org, token: target.token });
+    const proved = await provedTokenParam({ fin, urls, org: target.org, token: target.token, key });
     // Asked of the proof endpoints and of the endpoints the current root comes from, by block hash.
-    const atFinalized = proved.known ? await tokenParamAt({ urls: [...urls, ...chain.rpcs], org: target.org, token: target.token, blockHash: proved.block.hash }) : [];
+    const atFinalized = proved.known ? await tokenParamAt({ urls: [...urls, ...chain.rpcs], org: target.org, token: target.token, blockHash: proved.block.hash, key }) : [];
     return { proved, atFinalized };
   })();
-  proofMemo = { at: Date.now(), value };
+  proofMemo = { at: Date.now(), key, value };
   value.catch(() => { if (proofMemo && proofMemo.value === value) proofMemo = null; });
   return value;
 }
@@ -279,7 +291,7 @@ async function settle(got, deps = { allowed: proofAllowed, prove }) {
     e.agreed = got;
     throw e;
   };
-  const proving = deps.prove();
+  const proving = deps.prove(got.key);
   let found;
   try {
     found = await Promise.race([proving, new Promise((_, no) => setTimeout(() => no(new Error('the proof took too long')), deps.waitMs ?? PROOF_WAIT_MS))]);
@@ -359,7 +371,9 @@ async function pinned(clientId) {
 const trees = new Map();
 function treeOf(root) {
   if (!trees.has(root)) {
-    trees.set(root, checkedRead((ctx) => walk(ctx, root)).then((r) => {
+    // A root no ABX FS store knows may be a BAMFS root; the hashes settle which, not the name it was found under.
+    const read = checkedRead((ctx) => walk(ctx, root)).catch((e) => { if (e.kind !== 'notfound') throw e; return checkedRead((ctx) => bamfsWalk(ctx, root)); });
+    trees.set(root, read.then((r) => {
       if (r.kind === 'file') return { kind: 'file', files: new Map([['', { cid: root, info: r.info }]]), dirs: new Set(), unnamed: 0 };
       const files = new Map(), dirs = new Set();
       for (const x of r.items) {
@@ -404,7 +418,7 @@ const reading = new Map(); // cid -> Promise<Uint8Array>, so one file is assembl
 function contentOf(cid, info) {
   if (bodies.has(cid)) return Promise.resolve(bodies.get(cid));
   if (!reading.has(cid)) {
-    reading.set(cid, oneOfFew(() => checkedRead((ctx) => readFile(ctx, cid, info))).then((body) => { remember(cid, body); return body; }));
+    reading.set(cid, oneOfFew(() => checkedRead((ctx) => (info.generation ? bamfsRead(ctx, cid, info) : readFile(ctx, cid, info)))).then((body) => { remember(cid, body); return body; }));
     reading.get(cid).finally(() => reading.delete(cid)).catch(() => {});
   }
   return reading.get(cid);
