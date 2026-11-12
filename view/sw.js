@@ -517,9 +517,34 @@ function tokenPage(block) {
 // with what the endpoints return at that block. If this viewer and an endpoint give different replies, the next
 // load of the page is a warning with both, and a way through: nothing here can tell which side is wrong.
 // `deps` lets tests/recheck.mjs supply made-up answers.
-let recheckMemo = null; // { hash, value: Promise<verdict>, verdict }
-let tokenDiffers = null; // { hash, verdict, found, nonce }
-const through = new Set(); // replies the reader chose to open after the warning
+const RECHECK_TTL_MS = 5 * 60_000; // a result that is not final ("agreed", "newer") is asked for again after this
+let recheckMemo = null; // { hash, at, value: Promise<verdict>, verdict }
+// The warning that stands for this project: one worker serves one project. It is kept in the worker's store as
+// well, so that a worker the browser stopped and started again still has it. The project's own scripts can
+// empty that store; the page is then served and rechecked, which is where a project with no warning starts.
+let warning = null; // { seq, nonce, open, shown: { mine, block, theirs, pageHash, pageBlock, sources, reason } }
+let rechecks = 0, restored = null;
+const WARNING_KEY = `${OWN}store/token-warning`;
+const digest = (hex) => `0x${Array.from(keccak256(new TextEncoder().encode(hex)), (b) => b.toString(16).padStart(2, '0')).join('')}`; // as site/token.js hashes a reply
+const newNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+async function saveWarning() {
+  try {
+    const kept = await store();
+    if (warning) await kept.put(WARNING_KEY, new Response(JSON.stringify({ open: warning.open, shown: warning.shown })));
+    else await kept.delete(WARNING_KEY);
+  } catch { /* the warning stays in memory */ }
+}
+// Read once for the worker's life. Requests that arrive while it is being read wait for the same reading.
+function restoreWarning() {
+  restored ??= (async () => {
+    try {
+      const kept = await (await store()).match(WARNING_KEY);
+      const w = kept && await kept.json();
+      if (w && w.shown && !warning) warning = { seq: 0, nonce: newNonce(), open: w.open === true, shown: w.shown };
+    } catch { /* nothing kept */ }
+  })();
+  return restored;
+}
 async function computeToken(page) {
   const urls = PROOF_ENDPOINTS[chain.id];
   const fin = await finalizedBlock({ chainId: chain.id, checkpoint: CHECKPOINTS[chain.id].root, beacons: BEACONS[chain.id] });
@@ -530,48 +555,69 @@ async function computeToken(page) {
 async function recheck(page, deps = { allowed: proofAllowed, compute: computeToken }) {
   if (!chain || !CHECKPOINTS[chain.id] || !PROOF_ENDPOINTS[chain.id] || !page.call) return { state: 'agreed', reason: `no light client for ${chain ? chain.name : 'this chain'}` };
   if (!await deps.allowed()) return { state: 'agreed', reason: 'proving is switched off on this host' };
+  const seq = ++rechecks; // a run that started earlier does not undo what a later one found
   const found = await deps.compute(page);
   const verdict = judgeComputed({ ...found, headReply: page.reply, headBlock: page.block });
-  if (verdict.state === 'differs') tokenDiffers = { hash: page.hash, verdict, found, nonce: Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('') };
+  if (verdict.state === 'differs' && (!warning || seq > warning.seq)) {
+    const shown = {
+      mine: found.computed.success ? digest(found.computed.output) : 'the call fails', block: found.computed.block.number,
+      theirs: found.atFinalized.map(([name, reply]) => [name, digest(reply)]), pageHash: page.hash, pageBlock: page.block, sources: page.sources, reason: verdict.reason,
+    };
+    warning = { seq, nonce: newNonce(), open: false, shown };
+    await saveWarning();
+  } else if (verdict.state === 'proved' && warning && seq > warning.seq) {
+    warning = null;
+    await saveWarning();
+  }
   return verdict;
 }
-let keepAlive = () => {}; // set for each request: the worker is kept running while a recheck is under way
-function recheckLater(page) {
-  if (recheckMemo && recheckMemo.hash === page.hash) return recheckMemo;
-  const memo = { hash: page.hash, verdict: null };
-  memo.value = recheck(page).catch((e) => ({ state: 'agreed', reason: `the page was not recomputed: ${e.message || e}` })).then((v) => { memo.verdict = v; return v; });
-  keepAlive(memo.value);
-  recheckMemo = memo;
-  return memo;
+// `event` is the request the recheck was started for: the worker is kept running until the recheck ends.
+function recheckLater(page, event) {
+  const memo = recheckMemo;
+  const settled = memo && memo.verdict && (memo.verdict.state === 'proved' || memo.verdict.state === 'differs');
+  if (memo && memo.hash === page.hash && (!memo.verdict || settled || Date.now() - memo.at < RECHECK_TTL_MS)) return memo;
+  const next = { hash: page.hash, at: Date.now(), verdict: null };
+  next.value = recheck(page).catch((e) => ({ state: 'agreed', reason: `the page was not recomputed: ${e.message || e}` })).then((v) => { next.verdict = v; return v; });
+  try { if (event) event.waitUntil(next.value); } catch { /* the request has ended: the recheck runs while the worker does */ }
+  recheckMemo = next;
+  return next;
 }
 // What stands between a reader and a token page this viewer computes differently: both replies, and a way on.
-function differsPage(request, page) {
-  const { verdict, found, nonce } = tokenDiffers;
-  if (request.mode !== 'navigate') return new Response(`This viewer and an endpoint compute different pages: ${verdict.reason}`, { status: 502, headers: { 'content-type': 'text/plain; charset=utf-8', 'x-content-type-options': 'nosniff' } });
-  const mine = found.computed.success ? `0x${Array.from(keccak256(new TextEncoder().encode(found.computed.output)), (b) => b.toString(16).padStart(2, '0')).join('')}` : 'the call fails';
+// Only a top-level page load gets it. It is sandboxed and may not be framed, so that the project's own scripts,
+// which run on this origin, cannot read the link out of it.
+function differsPage(request) {
+  const { shown } = warning;
+  const plain = { status: 502, headers: { 'content-type': 'text/plain; charset=utf-8', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' } };
+  if (request.mode !== 'navigate' || request.destination !== 'document') return new Response(`This viewer and an endpoint compute different pages: ${shown.reason}. Open this project's address in a tab of its own.`, plain);
+  const rows = shown.theirs.map(([name, hash_]) => `<li><span class="mono">${esc(hash_)}</span> from ${esc(name)}${hash_ === shown.mine ? ' (the same as computed here)' : ''}</li>`).join('');
   return new Response(
     `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<title>This viewer and an endpoint compute different pages</title><link rel="stylesheet" href="${OWN}view.css">` +
     `<main><h1>This viewer and an endpoint compute different pages</h1>` +
-    `<p>This token's page is computed by its contract. The page was read from public endpoints, and this viewer also ran the contract's code itself, over the state of block ${found.computed.block.number.toLocaleString('en-US')} of ${esc(chain.name)} read by proof. The two do not give the same reply. Either an endpoint or this viewer's own code is wrong, and nothing here can tell which.</p>` +
-    `<h2>Computed here</h2><p><span class="mono">${esc(mine)}</span></p>` +
-    `<h2>From the endpoints</h2><p><span class="mono">${esc(page.hash)}</span> at block ${page.block.toLocaleString('en-US')}, from ${esc(page.sources.join(', '))}. ${esc(verdict.reason.charAt(0).toUpperCase() + verdict.reason.slice(1))}.</p>` +
-    `<p><a href="/?abxfs-open=${nonce}">Open the page the endpoints returned</a></p>` +
+    `<p>This token's page is computed by its contract. The page was read from public endpoints, and this viewer also ran the contract's code itself, over the state of block ${Number(shown.block).toLocaleString('en-US')} of ${esc(chain.name)} read by proof. The two do not give the same reply. Either an endpoint or this viewer's own code is wrong, and nothing here can tell which.</p>` +
+    `<h2>Computed here, at that block</h2><p><span class="mono">${esc(shown.mine)}</span></p>` +
+    `<h2>From the endpoints, at that block</h2>${rows ? `<ul>${rows}</ul>` : '<p>None answered.</p>'}` +
+    `<h2>From the endpoints, when the page was read</h2><p><span class="mono">${esc(shown.pageHash)}</span> at block ${Number(shown.pageBlock).toLocaleString('en-US')}, from ${esc(shown.sources.join(', '))}.</p>` +
+    `<p>${esc(shown.reason.charAt(0).toUpperCase() + shown.reason.slice(1))}. Each line above is the hash of a reply, not the reply.</p>` +
+    `<p><a href="/?abxfs-open=${warning.nonce}">Open the page the endpoints return</a></p>` +
     (checkUrl(target) ? `<p><a href="${esc(checkUrl(target))}">Run the check again on the check page</a></p>` : '') +
     `<p><a href="${OWN}info.html">What this viewer read and checked, and how to reset it</a></p></main>`,
-    { status: 502, headers: { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'content-security-policy': PAGE_CSP } },
+    { status: 502, headers: { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'cross-origin-opener-policy': 'same-origin', 'content-security-policy': `${PAGE_CSP}; sandbox allow-top-navigation-by-user-activation` } },
   );
 }
 // What a request for the token's page gets before the page itself: the warning, the way through, or nothing.
-// The way through is a link only the warning page holds: its address carries a number made for this warning.
-function tokenGate(request, page) {
-  if (!tokenDiffers || tokenDiffers.hash !== page.hash || through.has(page.hash)) return null;
-  if (new URL(request.url).searchParams.get('abxfs-open') !== tokenDiffers.nonce) return differsPage(request, page);
-  through.add(page.hash);
+// The way through is the warning's own link, followed as a page load: its address carries a number made for
+// this warning, and a request a script makes with that number opens nothing.
+function tokenGate(request) {
+  if (!warning || warning.open) return null;
+  const pageLoad = request.mode === 'navigate' && request.destination === 'document';
+  if (!pageLoad || new URL(request.url).searchParams.get('abxfs-open') !== warning.nonce) return differsPage(request);
+  warning.open = true;
+  saveWarning();
   return new Response(null, { status: 302, headers: { location: '/', 'cache-control': 'no-store' } });
 }
 const TEXT_TYPES = new Set(['text/html', 'image/svg+xml']);
-async function tokenAnswer(request, block, nothing) {
+async function tokenAnswer(request, block, nothing, event) {
   let page;
   try { page = await tokenPage(block); } catch (e) {
     // The contract has no tokenURI either, or the endpoints do not agree on it.
@@ -585,11 +631,13 @@ async function tokenAnswer(request, block, nothing) {
   let path;
   try { path = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, ''); } catch { path = '?'; }
   if (path !== '' && path !== 'index.html') return problem(request, 404, 'Not in this token', 'This token has one page, at the address with nothing after the hostname.');
-  const gate = tokenGate(request, page);
+  await restoreWarning();
+  const gate = tokenGate(request);
   if (gate) return gate;
-  const checked = recheckLater(page);
+  const checked = recheckLater(page, event);
   return withRange(request, read.bytes, {
-    'x-abxfs-recomputed': checked.verdict ? checked.verdict.state : 'running',
+    // "same": the endpoints at the finalized block return what this viewer computed. The check page says more.
+    'x-abxfs-recomputed': !checked.verdict ? 'running' : checked.verdict.state === 'proved' ? 'same' : checked.verdict.state,
     'content-type': TEXT_TYPES.has(read.mime) ? `${read.mime}; charset=utf-8` : read.mime,
     'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'origin-agent-cluster': '?1',
     'x-abxfs-reply': page.hash, 'x-abxfs-from': read.field === 'generator' ? 'the generator contract\'s document' : `tokenURI ${read.field}`, 'x-abxfs-agreed': `${page.sources.join(', ')} at block ${page.block}`,
@@ -647,7 +695,7 @@ async function answer(event) {
     return withRange(request, body, { ...headers, 'accept-ranges': 'bytes' });
   } catch (e) {
     if (e.kind === 'mismatch') return mismatchPage(request, e);
-    if (e.kind === 'notfound' && e.block !== undefined && target.kind === 'project') return tokenAnswer(request, e.block, e);
+    if (e.kind === 'notfound' && e.block !== undefined && target.kind === 'project') return tokenAnswer(request, e.block, e, event);
     const [status, title] = WHY[e.kind] || [500, 'The viewer failed'];
     return problem(request, status, title, e.message || String(e));
   }
@@ -664,7 +712,6 @@ self.addEventListener('fetch', (event) => {
   }
   if (request.method !== 'GET' && request.method !== 'HEAD') return void event.respondWith(new Response(null, { status: 405 }));
   if (!target || !chain) return; // the start page explains
-  keepAlive = (work) => event.waitUntil(work);
   event.respondWith(settingLoaded.then(() => answer(event)));
 });
 

@@ -118,15 +118,18 @@ function provedState({ urls, stateRoot, at }) {
 
 // Chains other than Ethereum, where this EVM's rules are Ethereum's and nothing more is known to hold. What
 // could differ is refused, so that a run ends as not run and never as another chain's answer.
-//   refused   opcodes: CLZ everywhere (a chain may not have it yet); on Arbitrum also the ones that read the
-//             block, which mean other things there (NUMBER is Ethereum's block number, for one)
-//   builtIn   addresses where the chain keeps contracts of its own (Arbitrum: 0x64 to 0xff)
-const CLZ = 0x1e, BLOCK_OPCODES = [0x41, 0x43, 0x44, 0x45, 0x48];
-const OTHER_CHAINS = {
-  8453: { refused: new Set([CLZ]) }, 84532: { refused: new Set([CLZ]) },
-  42161: { refused: new Set([CLZ, ...BLOCK_OPCODES]), builtIn: (address) => address >= 0x64n && address <= 0xffn },
-  421614: { refused: new Set([CLZ, ...BLOCK_OPCODES]), builtIn: (address) => address >= 0x64n && address <= 0xffn },
-};
+//   refused     opcodes that read the block and mean other things on Arbitrum (NUMBER is Ethereum's block
+//               number, for one)
+//   builtIn     addresses where Arbitrum keeps contracts of its own: 0x64 to 0xff, and 0xa4b05
+//   gasOpaque   on Arbitrum the gas a call has is not what this EVM counts: a call starts with less, by an
+//               amount that moves with Ethereum's fees, and other addresses start warm. A value read with GAS
+//               may only be passed to a call
+// Measured on live endpoints, 2026-11-12: Base gives a call the gas Ethereum's rules give, charges a first read
+// of any account as Ethereum does, and has CLZ. Arbitrum One has CLZ, and starts a call with about 190 less gas
+// than Ethereum's rules give, by an amount that differed by one between endpoints.
+const BLOCK_OPCODES = [0x41, 0x43, 0x44, 0x45, 0x48];
+const ARBITRUM = { refused: new Set(BLOCK_OPCODES), builtIn: (address) => (address >= 0x64n && address <= 0xffn) || address === 0xa4b05n, gasOpaque: true };
+const OTHER_CHAINS = { 8453: {}, 84532: {}, 42161: ARBITRUM, 421614: ARBITRUM };
 const ETHEREUM = new Set([1, 11155111]);
 
 // Run a view call over proved state at the block a proved header describes.

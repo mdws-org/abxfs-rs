@@ -302,7 +302,7 @@ async function rollupToken(chain, target, head, { read, shown, got, agreed }) {
     agreed: 'Agreed by the endpoints. Not proved.',
   };
   const reason = v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.';
-  say(v.state, texts[v.state], v.state === 'recomputed' ? `This viewer ran the contract's code itself over ${name}'s state at the block that ${kind === 'base' ? 'claim' : 'assertion'} commits to, each account and storage word read with a Merkle proof, and got the reply the page is made from. ${reason} With nothing or little to compare it with, a fault in this viewer's own code would not be caught, so this is not called proved.${final ? '' : ` The claim is not final and can still be challenged.`}` : `${agreed} ${reason}`);
+  say(v.state, texts[v.state], v.state === 'recomputed' ? `This viewer ran the contract's code itself over ${name}'s state at the block that ${kind === 'base' ? 'claim' : 'assertion'} commits to, each account and storage word read with a Merkle proof, and got the reply the page is made from. ${reason} With nothing or little to compare it with, a fault in this viewer's own code would not be caught, so this is not called proved.${final ? '' : ` The claim is not final and can still be challenged.`}${read.field === 'generator' && !read.complete ? ' The page loads at least one library from an address off the chain, and nothing here covers what that address serves.' : ''}` : `${agreed} ${reason}`);
 }
 
 // A rollup: which of its claims on Ethereum the current root matches.

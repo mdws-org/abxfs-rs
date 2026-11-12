@@ -89,6 +89,7 @@ const ON_ROLLUP = [
   ['the call fails here and an endpoint returns a reply', { computed: ran('0x', false), atClaim: [['a', '0xaa']], headReply: '0xaa' }, 'differs', /a returns another/],
   ['the call fails here, nothing to compare', { computed: ran('0x', false), atClaim: [], headReply: '0xaa' }, 'agreed', /fails/],
   ['the reply now is another', { computed: ran('0xaa'), atClaim: [], headReply: '0xcc' }, 'agreed', /changed since that block, or this viewer computes it differently/],
+  ['the reply now is another, and an endpoint agreed at that block', { computed: ran('0xaa'), atClaim: [['a', '0xaa']], headReply: '0xcc' }, 'agreed', /which 1 endpoint also returned there.*the page changed since that block$/],
   ['this EVM does not run the call', { computed: { done: false, why: 'opcode 0x43, which this viewer does not run on this chain' }, atClaim: [], headReply: '0xaa' }, 'agreed', /0x43/],
   ['a supporting call did not come out the same', { computed: ran('0xaa'), atClaim: [], headReply: '0xaa', supporting: [{ ok: false, why: 'the status was not recomputed' }] }, 'agreed', /status/],
   ['nothing was computed', { computed: null, atClaim: [], headReply: '0xaa' }, 'agreed', /not recomputed/],

@@ -88,7 +88,7 @@ function judgeRollupComputed({ computed, atClaim, headReply, supporting = [] }) 
   const other = atClaim.filter(([, reply]) => !computed.success || reply !== computed.output);
   if (other.length) return { state: 'differs', reason: `at ${at} this viewer computes one reply and ${other.map(([host]) => host).join(', ')} return${other.length === 1 ? 's' : ''} another` };
   if (computed.success === false) return { state: 'agreed', reason: `run here over the state of ${at}, the contract's call fails` };
-  if (headReply !== computed.output) return { state: 'agreed', reason: `the reply computed here at ${at} is not the reply the endpoints return now: the page changed since that block, or this viewer computes it differently, and no endpoint keeps that block to tell which` };
+  if (headReply !== computed.output) return { state: 'agreed', reason: atClaim.length ? `the reply computed here at ${at}, which ${atClaim.length} endpoint${atClaim.length === 1 ? '' : 's'} also returned there, is not the reply the endpoints return now: the page changed since that block` : `the reply computed here at ${at} is not the reply the endpoints return now: the page changed since that block, or this viewer computes it differently, and no endpoint keeps that block to tell which` };
   const shaky = supporting.find((s) => !s.ok);
   if (shaky) return { state: 'agreed', reason: `the page itself was recomputed here at ${at}, but ${shaky.why}` };
   return { state: 'recomputed', reason: atClaim.length ? `${atClaim.length} endpoint${atClaim.length === 1 ? '' : 's'} returned the same at ${at}` : `no endpoint answered at ${at}, so the result was not compared with any` };

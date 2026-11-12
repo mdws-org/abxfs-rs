@@ -18,7 +18,7 @@ const MUTANTS = [
   ['the calls the choice of page rested on', 'if (unsure) return', 'if (false) return'],
   ['on a rollup: an endpoint that returns another reply being a warning', "if (other.length) return { state: 'differs',", "if (other.length > 99) return { state: 'differs',"],
   ['on a rollup: a failing call', 'if (computed.success === false) return', 'if (false) return'],
-  ['on a rollup: the reply shown being the reply computed', 'if (headReply !== computed.output) return { state: \'agreed\', reason: `the reply computed here', 'if (false) return { state: \'agreed\', reason: `the reply computed here'],
+  ['on a rollup: the reply shown being the reply computed', "if (headReply !== computed.output) return { state: 'agreed', reason: atClaim.length ?", "if (false) return { state: 'agreed', reason: atClaim.length ?"],
   ['on a rollup: the supporting calls', 'if (shaky) return', 'if (false) return'],
   ['on a rollup: a call that was not run', 'if (!computed?.done) return', 'if (!computed) return'],
   ['a call that was not run', "if (!computed || !computed.done) return { state: 'agreed',", "if (!computed) return { state: 'agreed',"],

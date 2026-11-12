@@ -68,6 +68,10 @@ try {
 // The rules for other chains: tests/evm-chains.mjs must fail without each.
 const CHAIN_MUTANTS = [
   ['an opcode refused on a chain', "if (env.refused && env.refused.has(op)) return unsupported(", "if (false) return unsupported("],
+  ['the gas left being usable only by a call', "if (marks && marks.pop() && !gasUse) unsupported(", "if (marks && marks.pop() && false) unsupported("],
+  ['a copy of the gas left staying marked', "push(stack[stack.length - n], Boolean(marks && marks[marks.length - n]));", "push(stack[stack.length - n]);"],
+  ['a swapped gas value staying marked', " if (marks) [marks[t], marks[t - n]] = [marks[t - n], marks[t]];", ""],
+  ['one allowance for one pop', "    gasUse = false;\n    return stack.pop();", "    return stack.pop();"],
   ['a contract built into a chain', "if (m.env.builtIn && m.env.builtIn(pre)) return unsupported(", "if (false) return unsupported("],
 ];
 try {
