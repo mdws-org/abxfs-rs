@@ -9,6 +9,7 @@ const CHAINS = {
   'arbitrum-one': { id: 42161, name: 'Arbitrum One', rpcs: ['https://arb1.arbitrum.io/rpc', 'https://arbitrum-one-rpc.publicnode.com', 'https://arbitrum.drpc.org'] },
   ethereum: { id: 1, name: 'Ethereum', rpcs: ['https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org'] },
   'base-sepolia': { id: 84532, name: 'Base Sepolia', rpcs: ['https://sepolia.base.org', 'https://base-sepolia-rpc.publicnode.com', 'https://base-sepolia.drpc.org'] },
+  robinhood: { id: 4663, name: 'Robinhood Chain', rpcs: ['https://rpc.mainnet.chain.robinhood.com', 'https://robinhood-rpc.publicnode.com', 'https://robinhood.drpc.org'] },
   'arbitrum-sepolia': { id: 421614, name: 'Arbitrum Sepolia', rpcs: ['https://sepolia-rollup.arbitrum.io/rpc', 'https://arbitrum-sepolia-rpc.publicnode.com', 'https://arbitrum-sepolia.drpc.org'] },
   sepolia: { id: 11155111, name: 'Sepolia', rpcs: ['https://ethereum-sepolia-rpc.publicnode.com', 'https://0xrpc.io/sep'] },
 };

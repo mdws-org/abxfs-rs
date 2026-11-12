@@ -25,6 +25,7 @@ function show(info) {
   if (info.root) fact(dl, 'Root', info.root, true);
   fact(dl, 'Endpoints', info.chain.endpoints.join(', '));
   if (info.custom) fact(dl, 'Your endpoint', `${info.custom}, asked first for every checked read`);
+  if (info.check) { $('#check-link').href = info.check; $('#check').hidden = false; }
   showViewer(info);
   dl.hidden = false;
   if (info.error) {

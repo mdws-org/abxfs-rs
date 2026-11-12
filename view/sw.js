@@ -6,16 +6,27 @@
 // Nothing kept in the browser is trusted. A project's own scripts share this origin and can write its storage,
 // so the only things stored are raw chain replies, and every one of them passes the same checks as a fresh
 // reply each time it is used. Checked results live in this worker's memory only.
+//
+// On a chain this viewer has a light client for, a project's current root is also read by proof at the newest
+// finalized block and compared with what the endpoints give at that block. If the two differ, one of them is
+// wrong and nothing here can tell which, so the project is not shown. This origin states no verdict of its own:
+// a project's scripts could rewrite any words shown here. The verdict is on the check page, on another origin.
 
 import { CHAINS, LookupError, ZERO, fromHex, hash, host, quantity, readFile, rpc, walk, word } from './chain.js';
-import { gatewayUrl, parseHost } from './target.js';
+import { checkUrl, gatewayUrl, parseHost, viewUrl } from './target.js';
 import { BUILD, FILES } from './files.js';
+import { BEACONS, CHECKPOINTS } from './checkpoint.js';
+import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
+import { judge } from './verdict.js';
+import { agreedTokenUri, generatorPage, readTokenUri } from './token.js';
+import { readFile as bamfsRead, walk as bamfsWalk } from './bamfs.js';
 
 const TOKEN_PARAM = '0x6bd39222'; // tokenParam(uint256,bytes32)
 const KEY_CID = '61627866732e636964'.padEnd(64, '0'); // "abxfs.cid"
+const KEY_BAMFS = '62616d66732e636964'.padEnd(64, '0'); // "bamfs.cid": a project published to BAMFS, before ABX FS
 const HEAD_TTL_MS = 60_000;
 // About two minutes of blocks on each chain: how far an endpoint may be from the middle one.
-const MAX_LAG_BLOCKS = { 1: 10, 8453: 60, 84532: 60, 42161: 480, 421614: 480, 11155111: 10 };
+const MAX_LAG_BLOCKS = { 1: 10, 8453: 60, 84532: 60, 42161: 480, 421614: 480, 4663: 1200, 11155111: 10 };
 const STORE = 'abxfs-view-v2';
 const OWN = '/_abxfs/';
 const OWN_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -201,28 +212,120 @@ async function askHead() {
   if (near.length < 2) throw new LookupError('rpc', `fewer than two endpoints for ${chain.name} are at the same height, and a project's current version needs two that agree`);
   up.splice(0, up.length, ...near);
   const block = Math.min(...up.map((u) => u.block));
-  const data = TOKEN_PARAM + word(BigInt(target.token)) + KEY_CID;
-  const got = settled(await Promise.allSettled(up.map(async ({ url }) => {
-    const res = fromHex(await rpc(ctxFor(url), 'eth_call', [{ to: target.org, data }, '0x' + block.toString(16)]));
-    if (res.length < 32) throw new LookupError('check', 'tokenParam returned too little');
-    return { url, root: '0x' + Array.from(res.subarray(0, 32), (x) => x.toString(16).padStart(2, '0')).join('') };
-  })));
-  if (got.length < 2) throw new LookupError('rpc', `fewer than two endpoints answered at block ${block}`);
-  if (new Set(got.map((g) => g.root)).size > 1) throw new LookupError('check', `the endpoints disagree about this project's current version at block ${block} (${got.map((g) => host(g.url)).join(', ')})`);
-  return { root: got[0].root, sources: got.map((g) => host(g.url)), block };
+  // One token parameter from every endpoint at that block: at least two must answer, and all must agree.
+  // A contract with no token parameters (an image token) reverts. A revert is an answer, and it is recorded as
+  // the zero root, "nothing published": the token may still have a page of its own in tokenURI.
+  const param = async (key) => {
+    const data = TOKEN_PARAM + word(BigInt(target.token)) + key;
+    const got = settled(await Promise.allSettled(up.map(async ({ url }) => {
+      let reply;
+      try { reply = await rpc(ctxFor(url), 'eth_call', [{ to: target.org, data }, '0x' + block.toString(16)]); } catch (e) {
+        if (e.kind === 'rpc' && /revert/i.test(e.message || '')) return { url, root: ZERO };
+        throw e;
+      }
+      const res = fromHex(reply);
+      if (res.length < 32) throw new LookupError('check', 'tokenParam returned too little');
+      return { url, root: '0x' + Array.from(res.subarray(0, 32), (x) => x.toString(16).padStart(2, '0')).join('') };
+    })));
+    if (got.length < 2) throw new LookupError('rpc', `fewer than two endpoints answered at block ${block}`);
+    if (new Set(got.map((g) => g.root)).size > 1) throw new LookupError('check', `the endpoints disagree about this project's current version at block ${block} (${got.map((g) => host(g.url)).join(', ')})`);
+    return got;
+  };
+  let got = await param(KEY_CID), key = KEY_CID;
+  // No ABX FS root: the project may have been published to BAMFS, whose root is kept under another name.
+  if (got[0].root === ZERO) {
+    const older = await param(KEY_BAMFS).catch(() => null);
+    if (older && older[0].root !== ZERO) { got = older; key = KEY_BAMFS; }
+  }
+  return { root: got[0].root, sources: got.map((g) => host(g.url)), block, key };
 }
 
-let head = null; // { root, sources, block, at, stale }
+/* ── proof ───────────────────────────────────────────────────────────────── */
+
+const PROOF_TTL_MS = 5 * 60_000; // finality moves about every six and a half minutes
+const PROOF_WAIT_MS = 20_000;
+const SWITCH_TTL_MS = 60_000;
+
+// The host can turn proving off for every installed viewer by serving { "proof": false } here: a wrong proof
+// then stops nobody. It can only take the comparison away, and once this worker has seen it off it stays off
+// for the worker's life. A host that cannot be reached leaves proving as it was.
+let switchAt = 0, switchOn = true;
+async function proofAllowed() {
+  if (!switchOn || Date.now() - switchAt < SWITCH_TTL_MS) return switchOn;
+  switchAt = Date.now();
+  try {
+    const r = await fetch(`${OWN}switch.json`, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+    if (r.ok && (await r.json()).proof === false) switchOn = false;
+  } catch { /* unreachable: unchanged */ }
+  return switchOn;
+}
+
+// The root read by proof at the newest finalized block, and what the endpoints give at that block.
+let proofMemo = null; // { at, key, value: Promise<{ proved, atFinalized }> }
+function prove(key = KEY_CID) {
+  if (proofMemo && proofMemo.key === key && Date.now() - proofMemo.at < PROOF_TTL_MS) return proofMemo.value;
+  const value = (async () => {
+    const urls = PROOF_ENDPOINTS[chain.id];
+    const fin = await finalizedBlock({ chainId: chain.id, checkpoint: CHECKPOINTS[chain.id].root, beacons: BEACONS[chain.id] });
+    const proved = await provedTokenParam({ fin, urls, org: target.org, token: target.token, key });
+    // Asked of the proof endpoints and of the endpoints the current root comes from, by block hash.
+    const atFinalized = proved.known ? await tokenParamAt({ urls: [...urls, ...chain.rpcs], org: target.org, token: target.token, blockHash: proved.block.hash, key }) : [];
+    return { proved, atFinalized };
+  })();
+  proofMemo = { at: Date.now(), key, value };
+  value.catch(() => { if (proofMemo && proofMemo.value === value) proofMemo = null; });
+  return value;
+}
+
+// Compare the agreed head with the proof. Throws only on a mismatch; a proof that cannot be had (no light
+// client for this chain, proving switched off, a server down, a shipped root past its 14 days) changes nothing
+// here, because this origin claims nothing. `deps` lets tests/settle.mjs supply made-up answers.
+async function settle(got, deps = { allowed: proofAllowed, prove }) {
+  if (!chain || !CHECKPOINTS[chain.id] || !PROOF_ENDPOINTS[chain.id]) return { state: 'agreed', reason: `no light client for ${chain ? chain.name : 'this chain'}` };
+  if (!await deps.allowed()) return { state: 'agreed', reason: 'proving is switched off on this host' };
+  const decide = (found) => {
+    const verdict = { ...judge({ ...found, agreedHead: got }), proved: found.proved, atFinalized: found.atFinalized };
+    if (verdict.state !== 'mismatch') return verdict;
+    const e = new LookupError('mismatch', verdict.reason);
+    e.verdict = verdict;
+    e.agreed = got;
+    throw e;
+  };
+  const proving = deps.prove(got.key);
+  let found;
+  try {
+    found = await Promise.race([proving, new Promise((_, no) => setTimeout(() => no(new Error('the proof took too long')), deps.waitMs ?? PROOF_WAIT_MS))]);
+  } catch (e) {
+    // The page is not held longer than this, but the proof is still wanted: if it arrives and does not match,
+    // that is kept, and nothing more is served from this version.
+    proving.then((late) => { try { decide(late); } catch (m) { lateMismatch = { at: Date.now(), error: m }; head = null; } }, () => {});
+    return { state: 'agreed', reason: `no proof: ${e.message || e}` };
+  }
+  return decide(found);
+}
+// A mismatch that arrived after a page had already been answered. It stands for as long as a proof is kept.
+let lateMismatch = null;
+
+let head = null; // { root, sources, block, at, stale, verdict }
 let asking = null;
 function currentRoot() {
   if (target.kind === 'root') return Promise.resolve(target.root);
+  if (lateMismatch && Date.now() - lateMismatch.at < PROOF_TTL_MS) return Promise.reject(lateMismatch.error);
   if (head && Date.now() - head.at < HEAD_TTL_MS) return Promise.resolve(head.root);
   asking ||= (async () => {
     try {
       const got = await askHead();
-      if (got.root === ZERO) throw new LookupError('notfound', 'this project has nothing published');
-      head = { ...got, at: Date.now(), stale: false };
+      const verdict = await settle(got);
+      if (got.root === ZERO) {
+        // No ABX FS root. The token may still have a page of its own, in tokenURI: see tokenAnswer.
+        const none = new LookupError('notfound', 'this project has nothing published');
+        none.block = got.block;
+        throw none;
+      }
+      head = { ...got, at: Date.now(), stale: false, verdict: { state: verdict.state, reason: verdict.reason } };
     } catch (e) {
+      // A mismatch is never papered over with an earlier version.
+      if (e.kind === 'mismatch') { head = null; throw e; }
       // The endpoints cannot be reached: keep the version this worker last agreed on, marked as old.
       if (e.kind !== 'rpc' || !head) throw e;
       head = { ...head, at: Date.now() - HEAD_TTL_MS + 10_000, stale: true };
@@ -268,7 +371,9 @@ async function pinned(clientId) {
 const trees = new Map();
 function treeOf(root) {
   if (!trees.has(root)) {
-    trees.set(root, checkedRead((ctx) => walk(ctx, root)).then((r) => {
+    // A root no ABX FS store knows may be a BAMFS root; the hashes settle which, not the name it was found under.
+    const read = checkedRead((ctx) => walk(ctx, root)).catch((e) => { if (e.kind !== 'notfound') throw e; return checkedRead((ctx) => bamfsWalk(ctx, root)); });
+    trees.set(root, read.then((r) => {
       if (r.kind === 'file') return { kind: 'file', files: new Map([['', { cid: root, info: r.info }]]), dirs: new Set(), unnamed: 0 };
       const files = new Map(), dirs = new Set();
       for (const x of r.items) {
@@ -313,7 +418,7 @@ const reading = new Map(); // cid -> Promise<Uint8Array>, so one file is assembl
 function contentOf(cid, info) {
   if (bodies.has(cid)) return Promise.resolve(bodies.get(cid));
   if (!reading.has(cid)) {
-    reading.set(cid, oneOfFew(() => checkedRead((ctx) => readFile(ctx, cid, info))).then((body) => { remember(cid, body); return body; }));
+    reading.set(cid, oneOfFew(() => checkedRead((ctx) => (info.generation ? bamfsRead(ctx, cid, info) : readFile(ctx, cid, info)))).then((body) => { remember(cid, body); return body; }));
     reading.get(cid).finally(() => reading.delete(cid)).catch(() => {});
   }
   return reading.get(cid);
@@ -353,6 +458,78 @@ function problem(request, status, title, detail) {
     `<p><a href="${OWN}info.html">What this viewer read and checked, and how to reset it</a></p></main>`,
     { status, headers: { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'content-security-policy': PAGE_CSP } },
   );
+}
+
+// The proof and the endpoints give different roots at one block. Both are shown, each openable by its own
+// fixed address, where every file is checked against that root and no "current" question arises.
+function mismatchPage(request, e) {
+  if (request.mode !== 'navigate') return new Response(`The proof and the endpoints disagree: ${e.message}`, { status: 502, headers: { 'content-type': 'text/plain; charset=utf-8', 'x-content-type-options': 'nosniff' } });
+  const { proved, atFinalized } = e.verdict;
+  const open = (root) => { const u = viewUrl({ kind: 'root', chainId: target.chainId, root }); return u ? ` <a href="${esc(u)}">Open this version by its fixed address</a>` : ''; };
+  const rows = atFinalized.map(([host_, root]) => `<li><span class="mono">${esc(root)}</span> from ${esc(host_)}${root === proved.root ? ' (the same as the proof)' : open(root)}</li>`).join('');
+  return new Response(
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<title>The proof and the endpoints disagree</title><link rel="stylesheet" href="${OWN}view.css">` +
+    `<main><h1>The proof and the endpoints disagree</h1>` +
+    `<p>This viewer read the project's current version two ways at block ${proved.block.number.toLocaleString('en-US')} of ${esc(chain.name)}, and got two answers. One of them is wrong, and nothing here can tell which, so the project is not shown.</p>` +
+    `<h2>By proof</h2><p><span class="mono">${esc(proved.root)}</span>, proved from Ethereum's sync committee (${proved.participants} of 512 signed) through ${esc(proved.via)}.${open(proved.root)}</p>` +
+    `<h2>From the endpoints, at the same block</h2><ul>${rows}</ul>` +
+    `<h2>From the endpoints, now</h2><p><span class="mono">${esc(e.agreed.root)}</span> at block ${e.agreed.block.toLocaleString('en-US')}, from ${esc(e.agreed.sources.join(', '))}.</p>` +
+    `<p>A version opened by its fixed address is checked file by file against that root, whichever you choose.</p>` +
+    (checkUrl(target) ? `<p><a href="${esc(checkUrl(target))}">Run the check again on the check page</a></p>` : '') +
+    `<p><a href="${OWN}info.html">What this viewer read and checked, and how to reset it</a></p></main>`,
+    { status: 502, headers: { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'content-security-policy': PAGE_CSP } },
+  );
+}
+
+/* ── a token's own page ──────────────────────────────────────────────────── */
+
+// For a contract with no ABX FS root, the token's page is what tokenURI returns: an HTML page or an image held
+// in the metadata. tokenURI is computed by the contract, so this rests on the endpoints agreeing at one block
+// (site/token.js); nothing here is proved, and the check page says so.
+let tokenMemo = null; // { at, value: Promise<{ read, sources, block, hash }> }
+function tokenPage(block) {
+  if (tokenMemo && Date.now() - tokenMemo.at < HEAD_TTL_MS) return tokenMemo.value;
+  const value = (async () => {
+    // tokenURI first: when the contract itself returns a page or an image, that is the token's page.
+    let page = null, why = null;
+    try {
+      const got = await agreedTokenUri({ urls: chain.rpcs, org: target.org, token: target.token, block });
+      page = { read: readTokenUri(got.bytes), sources: got.sources, block: got.block, hash: got.hash };
+    } catch (e) { if (e.kind !== 'rpc') throw e; why = e; }
+    if (page && page.read.kind === 'page') return page;
+    // Otherwise a code project's page is the document ABX's generator contract builds for it.
+    const made = await generatorPage({ chainId: chain.id, urls: chain.rpcs, more: PROOF_ENDPOINTS[chain.id] || [], org: target.org, token: target.token, block }).catch((e) => { if (e.kind !== 'rpc') throw e; return null; });
+    if (made && made.kind === 'page') return { read: made, sources: made.sources, block, hash: made.hash };
+    if (made && made.kind === 'unread') return { read: made, sources: [], block, hash: '' };
+    if (page) return made && made.kind === 'offchain' && page.read.kind !== 'offchain' ? { ...page, read: made } : page;
+    if (made && made.kind === 'offchain') return { read: made, sources: [], block, hash: '' };
+    throw why;
+  })();
+  tokenMemo = { at: Date.now(), value };
+  value.catch(() => { if (tokenMemo && tokenMemo.value === value) tokenMemo = null; });
+  return value;
+}
+const TEXT_TYPES = new Set(['text/html', 'image/svg+xml']);
+async function tokenAnswer(request, block, nothing) {
+  let page;
+  try { page = await tokenPage(block); } catch (e) {
+    // The contract has no tokenURI either, or the endpoints do not agree on it.
+    if (e.kind === 'rpc') return problem(request, 404, 'Nothing here', nothing.message);
+    return problem(request, 502, 'The chain’s answer did not check out', e.message || String(e));
+  }
+  const { read } = page;
+  if (read.kind === 'unread') return problem(request, 502, 'Could not reach the chain', read.why);
+  if (read.kind === 'offchain') return problem(request, 404, 'This token’s artwork is not on chain', `The contract's tokenURI says its ${read.what} is at ${read.where}. This viewer shows only what is read from the chain.`);
+  if (read.kind !== 'page') return problem(request, 404, 'Nothing here', `This project has nothing published in ABX FS, and its tokenURI holds nothing this viewer shows: ${read.why}.`);
+  let path;
+  try { path = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, ''); } catch { path = '?'; }
+  if (path !== '' && path !== 'index.html') return problem(request, 404, 'Not in this token', 'This token has one page, at the address with nothing after the hostname.');
+  return withRange(request, read.bytes, {
+    'content-type': TEXT_TYPES.has(read.mime) ? `${read.mime}; charset=utf-8` : read.mime,
+    'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'origin-agent-cluster': '?1',
+    'x-abxfs-reply': page.hash, 'x-abxfs-from': read.field === 'generator' ? 'the generator contract\'s document' : `tokenURI ${read.field}`, 'x-abxfs-agreed': `${page.sources.join(', ')} at block ${page.block}`,
+  });
 }
 
 const WHY = {
@@ -405,6 +582,8 @@ async function answer(event) {
     if (!found) return new Response(request.method === 'HEAD' ? null : body, { status: 404, headers });
     return withRange(request, body, { ...headers, 'accept-ranges': 'bytes' });
   } catch (e) {
+    if (e.kind === 'mismatch') return mismatchPage(request, e);
+    if (e.kind === 'notfound' && e.block !== undefined && target.kind === 'project') return tokenAnswer(request, e.block, e);
     const [status, title] = WHY[e.kind] || [500, 'The viewer failed'];
     return problem(request, status, title, e.message || String(e));
   }
@@ -437,7 +616,7 @@ self.addEventListener('message', (event) => {
   event.waitUntil((async () => {
     await settingLoaded;
     const out = {
-      target, build: BUILD, files: FILES, custom: custom && host(custom),
+      target, build: BUILD, files: FILES, custom: custom && host(custom), check: target && target.kind === 'project' ? checkUrl(target) : null,
       chain: chain && { name: chain.name, id: chain.id, endpoints: chain.rpcs.map(host) },
     };
     try {
@@ -482,5 +661,6 @@ async function setEndpoint(value) {
   }
 }
 
-// For tests/head-rule.mjs, which runs the current-root rule against made-up endpoints.
-export { askHead };
+// For tests/head-rule.mjs and tests/settle.mjs, which run these rules against made-up answers.
+const standingMismatch = () => (lateMismatch && Date.now() - lateMismatch.at < PROOF_TTL_MS ? lateMismatch.error : null);
+export { askHead, proofAllowed, settle, standingMismatch };

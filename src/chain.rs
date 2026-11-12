@@ -31,6 +31,7 @@ pub const CHAINS: &[ChainInfo] = &[
     ChainInfo { name: "ethereum", id: 1, rpc: "https://ethereum-rpc.publicnode.com" },
     ChainInfo { name: "sepolia", id: 11155111, rpc: "https://ethereum-sepolia-rpc.publicnode.com" },
     ChainInfo { name: "arbitrum-one", id: 42161, rpc: "https://arb1.arbitrum.io/rpc" },
+    ChainInfo { name: "robinhood", id: 4663, rpc: "https://rpc.mainnet.chain.robinhood.com" },
     ChainInfo { name: "arbitrum-sepolia", id: 421614, rpc: "https://sepolia-rollup.arbitrum.io/rpc" },
 ];
 

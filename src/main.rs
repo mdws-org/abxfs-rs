@@ -35,7 +35,7 @@ verify   Plans the local folder or file offline and compares its root with <root
          listed as 'same' and is not a difference. Exit 0 only on a full match, or when the only differences
          are such codec-encoded files.
 
-  --chain <name>     base, base-sepolia, ethereum, sepolia, arbitrum-one, arbitrum-sepolia
+  --chain <name>     base, base-sepolia, ethereum, sepolia, arbitrum-one, arbitrum-sepolia, robinhood
   --rpc <URL>        JSON-RPC endpoint (default: the chain's public endpoint)
   --in-flight <N>    most HTTP requests open at once (default 8)
   --stats            print request counts and timing to stderr";

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="color-scheme" content="dark light" />
+        <meta name="robots" content="noindex" />
+        <title>Check a project's current version</title>
+        <link rel="stylesheet" href="/_abxfs/view.css" />
+        <script type="module" src="/_abxfs/check.js"></script>
+    </head>
+    <body>
+        <main>
+            <h1 id="title">Check a project's current version</h1>
+            <p id="verdict" role="status" data-state="working">Reading…</p>
+            <p id="reason" class="soft"></p>
+            <p id="open" hidden><a id="open-link" href="#">Open the project</a></p>
+            <dl id="facts" hidden></dl>
+
+            <h2>What this page does</h2>
+            <p>
+                A project's files are checked against its root wherever they are shown. Which root is the
+                project's current one is a separate question, and this page answers it two ways and compares
+                the answers.
+            </p>
+            <p>
+                By proof: starting from a block built into this viewer, it follows Ethereum's sync committee
+                to a recent finalized block, checking each signature, and reads the project's root out of
+                that block's state with a Merkle proof. No server is believed along the way. By agreement: it
+                asks several public endpoints for the root, at that same block and at the newest block.
+            </p>
+            <p>
+                Finality runs about a quarter of an hour behind. A version published since then cannot be
+                proved yet, and is reported as such.
+            </p>
+            <p class="soft">
+                This page is on its own address, which a project's scripts cannot change. A project's page can
+                show any words it likes, including these; only the page whose address begins with
+                <span class="mono">check.</span> is this one. The proof rests on two things: the starting block
+                built into this viewer, and at least two thirds of each sync committee since then being honest.
+                Committee members are not penalised for signing a false block.
+            </p>
+            <p class="soft">Viewer build <span id="build" class="mono"></span></p>
+        </main>
+    </body>
+</html>

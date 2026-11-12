@@ -3,6 +3,9 @@
 import { CHAINS } from './chain.js';
 import { gatewayUrl, parseHost } from './target.js';
 
+// The hostname check.<host> is the check page, which runs with no service worker.
+if (location.hostname.split('.')[0] === 'check') location.replace('/_abxfs/check.html' + location.hash);
+
 const status = document.getElementById('status');
 const say = (text) => { status.textContent = text; };
 // When the reader cannot run here, a project can still be opened on the official gateway.
@@ -32,6 +35,7 @@ function reloadOnce() {
 }
 
 async function start() {
+  if (location.hostname.split('.')[0] === 'check') return;
   if (!target) return say('This address does not name a project or a root. The first part of the hostname is "<chain id>-<org address>-<project number>" for a project, or "r<chain id>-<root in base32>" for a root.');
   if (!chain) return say(`This viewer does not read chain ${target.chainId}.`);
   document.getElementById('title').textContent = target.kind === 'project' ? `Project ${target.token} of ${target.org}` : `Root ${target.root}`;

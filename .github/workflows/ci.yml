@@ -1,0 +1,66 @@
+name: tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  viewer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Vendored files match their checksums, and the viewer builds
+        run: python3 tools/build-view.py
+      - name: Light client, official Merkle proof vectors
+        run: node tests/spec-vectors.mjs
+      - name: Light client, recorded replies with planted lies
+        run: node tests/light-replay.mjs
+      - name: Light client, a chain whose keys the test holds
+        run: node tests/light-synth.mjs
+      - name: Light client, each check removed in turn
+        run: node tests/light-mutants.mjs
+      - name: Proofs, recorded and hand-built
+        run: node tests/proof-replay.mjs
+      - name: Proofs, each check removed in turn
+        run: node tests/proof-mutants.mjs
+      - name: Base, each rule against a made-up Ethereum state, and a recorded read with lies
+        run: node tests/base-rules.mjs && node tests/base-replay.mjs
+      - name: Base, each rule removed in turn
+        run: node tests/base-mutants.mjs
+      - name: Arbitrum-family rollups, each rule against a made-up state, then removed in turn
+        run: node tests/arbitrum-rules.mjs && node tests/arbitrum-mutants.mjs
+      - name: Token pages, reading a tokenURI reply
+        run: node tests/token.mjs
+      - name: BAMFS, recorded reads with lies, then each check removed in turn
+        run: node tests/bamfs-replay.mjs && node tests/bamfs-mutants.mjs
+      - name: EVM, generated programs against a production EVM (outcome, output and gas), then each rule changed in turn
+        run: |
+          set -e
+          mkdir "$RUNNER_TEMP/evm" && (cd "$RUNNER_TEMP/evm" && npm init -y >/dev/null && npm install --ignore-scripts --no-audit --no-fund @ethereumjs/evm@10.1.3 @ethereumjs/common@10.1.3 @ethereumjs/util@10.1.3)
+          EVM_DIR="$RUNNER_TEMP/evm" node tests/evm-fuzz.mjs 3000
+          EVM_DIR="$RUNNER_TEMP/evm" node tests/evm-mutants.mjs
+      - name: Verdict rule, then the rule for computed pages with each condition removed in turn
+        run: node tests/verdict.mjs && node tests/verdict-mutants.mjs
+      - name: Current-root rule and the stop-on-mismatch rule
+        run: node tests/head-rule.mjs && node tests/settle.mjs
+  reader:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate the seeded test corpus the golden tests read
+        run: node oracle/make-corpus.mjs oracle/corpus-edge
+      - name: Build the Rust reader and run its tests
+        run: cargo build --release --locked && cargo test --release --locked
+      - name: Read a Robinhood Chain project's root and compare it with the plan of what was read
+        run: |
+          set -e
+          root=0x6c9ecd770bdcc3d7a0b3cf815d35f906658a12b2d93fc89cbef08ff605d21537
+          ./target/release/abxfs-rs read "$root" --chain robinhood --out got
+          ls -la got
+          ./target/release/abxfs-rs verify "$root" got --chain robinhood
