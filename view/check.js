@@ -6,6 +6,7 @@ import { BEACONS, CHECKPOINTS } from './checkpoint.js';
 import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
 import { judge, judgeRollup } from './verdict.js';
 import { baseClaims, baseTokenParam } from './base.js';
+import { agreedTokenUri, readTokenUri } from './token.js';
 import { ROLLUPS as ARBITRUM, confirmed, rollupTokenParam } from './arbitrum.js';
 import { BUILD } from './files.js';
 
@@ -44,7 +45,17 @@ async function agreedHead(chain, target) {
   const near = up.filter((u) => Math.abs(u.block - middle) <= (MAX_LAG[chain.id] ?? 10));
   if (near.length < 2) throw new Error(`fewer than two endpoints for ${chain.name} are at the same height`);
   const block = Math.min(...near.map((u) => u.block));
-  const got = await tokenParamAt({ urls: near.map((u) => u.url), org: target.org, token: target.token, block });
+  // A contract with no token parameters (an image token) reverts; that is an answer, recorded as the zero root.
+  const data = '0x6bd39222' + BigInt(target.token).toString(16).padStart(64, '0') + '61627866732e636964'.padEnd(64, '0');
+  const got = settled(await Promise.allSettled(near.map(async ({ url }) => {
+    let reply;
+    try { reply = await rpc(ctx(url), 'eth_call', [{ to: target.org, data }, '0x' + block.toString(16)]); } catch (e) {
+      if (/revert/i.test(e.message || '')) return [new URL(url).host, ZERO];
+      throw e;
+    }
+    if (typeof reply !== 'string' || reply.length < 66) throw new Error('tokenParam returned too little');
+    return [new URL(url).host, reply.slice(0, 66).toLowerCase()];
+  })));
   if (got.length < 2) throw new Error(`fewer than two endpoints answered at block ${block}`);
   if (new Set(got.map(([, root]) => root)).size > 1) throw new Error(`the endpoints disagree about this project's current version at block ${block}: ${got.map(([h, r]) => `${h} gives ${r}`).join(', ')}`);
   return { root: got[0][1], block, sources: got.map(([h]) => h) };
@@ -77,7 +88,7 @@ async function run() {
   try { head = await agreedHead(chain, target); } catch (e) { return say('unreachable', 'The endpoints could not be read.', e.message); }
   fact('Root from the endpoints, now', head.root, true);
   fact('Agreed by', `${head.sources.join(', ')} at block ${count(head.block)}`);
-  if (head.root === ZERO) { $('#open').hidden = true; return say('none', 'This project has nothing published.'); }
+  if (head.root === ZERO) return token(chain, target, head, openUrl);
   $('#open').hidden = !openUrl;
 
   if (ROLLUPS[chain.id]) return rollup(chain, target, head);
@@ -120,6 +131,25 @@ async function run() {
   };
   if (v.state === 'mismatch') $('#open').hidden = true;
   say(v.state, texts[v.state], v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.');
+}
+
+// No ABX FS root: what the contract's tokenURI holds, as the endpoints agree on it.
+async function token(chain, target, head, openUrl) {
+  $('#open').hidden = true;
+  say('working', 'No ABX FS root. Asking the endpoints for the token\'s own page (tokenURI)…');
+  let got;
+  try { got = await agreedTokenUri({ urls: chain.rpcs, org: target.org, token: target.token, block: head.block }); } catch (e) {
+    return e.kind === 'check' ? say('unreachable', 'The endpoints do not agree on this token.', e.message) : say('none', 'This project has nothing published.', 'It has no ABX FS root, and fewer than two endpoints returned a tokenURI for it.');
+  }
+  const read = readTokenUri(got.bytes);
+  fact('tokenURI', `${count(got.bytes.length)} bytes, the same from ${got.sources.join(', ')} at block ${count(got.block)}`);
+  if (read.name) fact('Name in the metadata', read.name);
+  if (read.kind === 'offchain') return say('offchain', 'This token\'s artwork is not on chain.', `The contract's tokenURI says its ${read.what} is at ${read.where}. This viewer shows only what is read from the chain.`);
+  if (read.kind !== 'page') return say('none', 'This project has nothing published.', `It has no ABX FS root, and its tokenURI holds nothing this viewer shows: ${read.why}.`);
+  fact('Shown as', `${read.mime}, ${count(read.bytes.length)} bytes, from the metadata's ${read.field}`);
+  $('#open-link').textContent = 'Open the token\'s page';
+  $('#open').hidden = !openUrl;
+  say('agreed', 'Agreed by the endpoints. Not proved.', `This contract keeps its artwork in tokenURI, which the contract computes when asked. ${got.sources.length} endpoints return the same reply at block ${count(got.block)}, and the page is exactly what that reply holds. No storage proof covers a computed reply.`);
 }
 
 // A rollup: which of its claims on Ethereum the current root matches.

@@ -19,6 +19,7 @@ function endpoints(behave, asked) {
     const reply = (result) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
     if (method === 'eth_chainId') return reply('0x2105');
     if (method === 'eth_blockNumber') return reply('0x' + b.block.toString(16));
+    if (b.root === 'revert') return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: 3, message: 'execution reverted' } }));
     asked.push(parseInt(params[1], 16));
     const root = typeof b.root === 'function' ? b.root(parseInt(params[1], 16)) : b.root;
     return reply(root + '00'.repeat(64));
@@ -37,6 +38,9 @@ const cases = [
   // block must not pull the read back to before the publish.
   ['a liar reports an old block', { [A]: { block: 1000, root: AT }, [B]: { block: 10000, root: AT }, [C]: { block: 10001, root: AT } }, GOOD, 10000],
   ['a liar reports a future block', { [A]: { block: 999999, root: AT }, [B]: { block: 10000, root: AT }, [C]: { block: 10001, root: AT } }, GOOD, 10000],
+  // A contract with no token parameters reverts: that is an answer, the zero root, not an endpoint failing.
+  ['all three revert', { [A]: { block: 100, root: 'revert' }, [B]: { block: 100, root: 'revert' }, [C]: { block: 100, root: 'revert' } }, '0x' + '00'.repeat(32)],
+  ['one reverts, two give a root', { [A]: { block: 100, root: 'revert' }, [B]: { block: 100, root: GOOD }, [C]: { block: 100, root: GOOD } }, 'check'],
   ['two endpoints far apart', { [A]: { block: 1000, root: AT }, [B]: { block: 10000, root: AT }, [C]: 'down' }, 'rpc'],
 ];
 let bad = 0;

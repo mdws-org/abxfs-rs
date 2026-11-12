@@ -156,6 +156,14 @@ A verdict on Base never stops a page. A claim that is not final rests on Base's 
 
 Proofs at the anchor's Base block need an endpoint that keeps state for 5 days. One public endpoint was found that does (`BASE_PROOF_ENDPOINTS` in `site/base.js`). If it does not answer, the anchor comparison is not made and the check page says so.
 
+### Token pages
+
+Many ABX contracts keep their artwork in `tokenURI` and have no ABX FS root: image tokens, and code projects whose page the contract assembles from stored script. For those the viewer serves the token's own page at the same hostname (`site/token.js`). `tokenURI` (or `uri` on an ERC-1155 contract) is asked of every endpoint at one block. At least two must answer, and all that answer must return the same bytes. The reply must be a `data:` URI holding JSON. Its `animation_url`, when it is an HTML `data:` URI, is the page; otherwise its `image`, when it is an image `data:` URI, is. The page is exactly those bytes.
+
+When the metadata, or the art it names, is at an address off the chain, the viewer says where and shows nothing. It does not fetch it.
+
+A `tokenURI` reply is computed by the contract, so no storage proof covers it. The check page says "Agreed by the endpoints. Not proved." for a token page on every chain.
+
 ### Arbitrum One and Robinhood Chain
 
 Both run the same rollup contract on Ethereum (`site/arbitrum.js`). Its storage holds the hash of the newest confirmed assertion, read by proof at the finalized Ethereum block. An assertion's hash is `keccak(parent . keccak(state after it) . inbox accumulator)`, and the state after it holds the hash of a rollup block. What the hash was made from comes from the `AssertionCreated` log an endpoint gives, and must hash to it. The rollup block's header, re-hashed, gives its state root, and the project's root is read there by storage proof. The rollup contract is a proxy with two implementations; both addresses are proved and must be the pinned ones.
@@ -197,6 +205,7 @@ node tests/light-mutants.mjs    # light.js with one check removed at a time; eac
 node tests/proof-replay.mjs     # recorded proofs from four chains, RLP cases, hand-built tries
 node tests/proof-mutants.mjs    # proof.js with one check removed at a time
 node tests/verdict.mjs          # the verdict table
+node tests/token.mjs            # reading a tokenURI reply, and the agreement rule against made-up endpoints
 node tests/base-rules.mjs       # each rule for Base's contracts on Ethereum, against a made-up state
 node tests/base-replay.mjs      # a recorded read on Base at a claim's block, then one digit changed in every reply
 node tests/base-mutants.mjs     # base.js with one rule removed at a time
@@ -207,6 +216,7 @@ node tests/light-live.mjs mainnet            # live: from a finalized root two b
 node tests/proved-live.mjs                   # live: a project's root by proof through each proof endpoint
 node tests/base-live.mjs                     # live: Base's anchor and newest claims, and a project's root at each
 node tests/arbitrum-live.mjs                 # live: the confirmed assertion of Arbitrum One and Robinhood Chain
+node tests/token-page.mjs                    # live: token pages in a browser equal an independent read of tokenURI
 node tests/check-page.mjs                    # live: the check page in a browser (needs tools/view-serve.py running)
 LODESTAR_DIR=<dir> node tests/light-lodestar.mjs   # the same recordings and lies given to Lodestar's light client
 ```

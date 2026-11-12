@@ -18,6 +18,7 @@ import { BUILD, FILES } from './files.js';
 import { BEACONS, CHECKPOINTS } from './checkpoint.js';
 import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
 import { judge } from './verdict.js';
+import { agreedTokenUri, readTokenUri } from './token.js';
 
 const TOKEN_PARAM = '0x6bd39222'; // tokenParam(uint256,bytes32)
 const KEY_CID = '61627866732e636964'.padEnd(64, '0'); // "abxfs.cid"
@@ -210,8 +211,15 @@ async function askHead() {
   up.splice(0, up.length, ...near);
   const block = Math.min(...up.map((u) => u.block));
   const data = TOKEN_PARAM + word(BigInt(target.token)) + KEY_CID;
+  // A contract with no token parameters (an image token) reverts. A revert is an answer, and it is recorded as
+  // the zero root, "nothing published": the token may still have a page of its own in tokenURI.
   const got = settled(await Promise.allSettled(up.map(async ({ url }) => {
-    const res = fromHex(await rpc(ctxFor(url), 'eth_call', [{ to: target.org, data }, '0x' + block.toString(16)]));
+    let reply;
+    try { reply = await rpc(ctxFor(url), 'eth_call', [{ to: target.org, data }, '0x' + block.toString(16)]); } catch (e) {
+      if (e.kind === 'rpc' && /revert/i.test(e.message || '')) return { url, root: ZERO };
+      throw e;
+    }
+    const res = fromHex(reply);
     if (res.length < 32) throw new LookupError('check', 'tokenParam returned too little');
     return { url, root: '0x' + Array.from(res.subarray(0, 32), (x) => x.toString(16).padStart(2, '0')).join('') };
   })));
@@ -296,7 +304,12 @@ function currentRoot() {
     try {
       const got = await askHead();
       const verdict = await settle(got);
-      if (got.root === ZERO) throw new LookupError('notfound', 'this project has nothing published');
+      if (got.root === ZERO) {
+        // No ABX FS root. The token may still have a page of its own, in tokenURI: see tokenAnswer.
+        const none = new LookupError('notfound', 'this project has nothing published');
+        none.block = got.block;
+        throw none;
+      }
       head = { ...got, at: Date.now(), stale: false, verdict: { state: verdict.state, reason: verdict.reason } };
     } catch (e) {
       // A mismatch is never papered over with an earlier version.
@@ -455,6 +468,40 @@ function mismatchPage(request, e) {
   );
 }
 
+/* ── a token's own page ──────────────────────────────────────────────────── */
+
+// For a contract with no ABX FS root, the token's page is what tokenURI returns: an HTML page or an image held
+// in the metadata. tokenURI is computed by the contract, so this rests on the endpoints agreeing at one block
+// (site/token.js); nothing here is proved, and the check page says so.
+let tokenMemo = null; // { at, value: Promise<{ read, sources, block, hash }> }
+function tokenPage(block) {
+  if (tokenMemo && Date.now() - tokenMemo.at < HEAD_TTL_MS) return tokenMemo.value;
+  const value = agreedTokenUri({ urls: chain.rpcs, org: target.org, token: target.token, block }).then((got) => ({ read: readTokenUri(got.bytes), sources: got.sources, block: got.block, hash: got.hash }));
+  tokenMemo = { at: Date.now(), value };
+  value.catch(() => { if (tokenMemo && tokenMemo.value === value) tokenMemo = null; });
+  return value;
+}
+const TEXT_TYPES = new Set(['text/html', 'image/svg+xml']);
+async function tokenAnswer(request, block, nothing) {
+  let page;
+  try { page = await tokenPage(block); } catch (e) {
+    // The contract has no tokenURI either, or the endpoints do not agree on it.
+    if (e.kind === 'rpc') return problem(request, 404, 'Nothing here', nothing.message);
+    return problem(request, 502, 'The chain’s answer did not check out', e.message || String(e));
+  }
+  const { read } = page;
+  if (read.kind === 'offchain') return problem(request, 404, 'This token’s artwork is not on chain', `The contract's tokenURI says its ${read.what} is at ${read.where}. This viewer shows only what is read from the chain.`);
+  if (read.kind !== 'page') return problem(request, 404, 'Nothing here', `This project has nothing published in ABX FS, and its tokenURI holds nothing this viewer shows: ${read.why}.`);
+  let path;
+  try { path = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, ''); } catch { path = '?'; }
+  if (path !== '' && path !== 'index.html') return problem(request, 404, 'Not in this token', 'This token has one page, at the address with nothing after the hostname.');
+  return withRange(request, read.bytes, {
+    'content-type': TEXT_TYPES.has(read.mime) ? `${read.mime}; charset=utf-8` : read.mime,
+    'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'origin-agent-cluster': '?1',
+    'x-abxfs-token-uri': page.hash, 'x-abxfs-agreed': `${page.sources.join(', ')} at block ${page.block}`,
+  });
+}
+
 const WHY = {
   rpc: [502, 'Could not reach the chain'],
   check: [502, 'The chain’s answer did not check out'],
@@ -506,6 +553,7 @@ async function answer(event) {
     return withRange(request, body, { ...headers, 'accept-ranges': 'bytes' });
   } catch (e) {
     if (e.kind === 'mismatch') return mismatchPage(request, e);
+    if (e.kind === 'notfound' && e.block !== undefined && target.kind === 'project') return tokenAnswer(request, e.block, e);
     const [status, title] = WHY[e.kind] || [500, 'The viewer failed'];
     return problem(request, status, title, e.message || String(e));
   }

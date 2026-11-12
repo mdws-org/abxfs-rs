@@ -64,11 +64,11 @@ const RPC_REPLY_BYTES = 1_000_000; // an account proof and two storage proofs ar
 const BEACON_REPLY_BYTES = 2_000_000; // eight period updates are about 400 KB
 
 // One JSON-RPC call to one endpoint, with a deadline. Nothing it returns is believed unchecked.
-async function call(url, method, params, ms = 15_000) {
+async function call(url, method, params, ms = 15_000, limit = RPC_REPLY_BYTES) {
   const who = new URL(url).host;
   const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(ms) });
   if (!r.ok) throw new ProvedError('rpc', `${who} answered ${r.status}`);
-  const j = await boundedJson(r, RPC_REPLY_BYTES, who);
+  const j = await boundedJson(r, limit, who);
   if (!j || j.error || j.result === undefined) throw new ProvedError('rpc', `${who}: ${(j && j.error && j.error.message) || 'no result'}`);
   return j.result;
 }

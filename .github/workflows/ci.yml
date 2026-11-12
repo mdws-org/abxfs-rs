@@ -32,6 +32,8 @@ jobs:
         run: node tests/base-mutants.mjs
       - name: Arbitrum-family rollups, each rule against a made-up state, then removed in turn
         run: node tests/arbitrum-rules.mjs && node tests/arbitrum-mutants.mjs
+      - name: Token pages, reading a tokenURI reply
+        run: node tests/token.mjs
       - name: Verdict rule
         run: node tests/verdict.mjs
       - name: Current-root rule and the stop-on-mismatch rule
