@@ -1,9 +1,12 @@
 // The check page in a browser, against live chains: each address must reach the verdict named beside it.
 // usage: tools/build-view.py && tools/view-serve.py &   then   CHROME_PATH=... node tests/check-page.mjs [port]
+//        CHECK_BASE=https://check.<host>/ CHROME_PATH=... node tests/check-page.mjs     the deployed page
 import { createRequire } from 'node:module';
 const require = createRequire(process.env.PLAYWRIGHT_DIR || '/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
 const { chromium } = require('playwright-core');
+// CHECK_BASE names another check page, such as the deployed one: CHECK_BASE=https://check.fromchain.dynv6.net/
 const port = process.argv[2] || '8853';
+const base = process.env.CHECK_BASE || `http://check.localhost:${port}/`;
 const CASES = [
   ['an Ethereum project', '#1-e8978b5d18980fa16494fb83167c84cbbe9a6816-0', ['proved', 'newer']],
   ['a Base project (no light client for Base)', '#8453-ab025e1f9f469ae55e5f193ecdddaa1e0f4e2ff6-0', ['agreed']],
@@ -18,7 +21,7 @@ for (const [name, hash, want] of CASES) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   const t0 = Date.now();
-  await page.goto(`http://check.localhost:${port}/${hash}`);
+  await page.goto(base + hash);
   await page.waitForFunction(() => { const v = document.querySelector('#verdict'); return v && v.dataset.state !== 'working'; }, null, { timeout: 120_000 }).catch(() => {});
   const got = await page.evaluate(() => ({ state: document.querySelector('#verdict')?.dataset.state, text: document.querySelector('#verdict')?.textContent, reason: document.querySelector('#reason')?.textContent, facts: [...document.querySelectorAll('#facts dt')].map((dt) => dt.textContent), path: location.pathname, workers: navigator.serviceWorker ? null : 'none', open: !document.querySelector('#open').hidden }));
   const regs = await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length);
