@@ -27,4 +27,18 @@ function judge({ proved, atFinalized = [], agreedHead }) {
   return { state: 'newer', reason: proved.isSet === false ? `this version was published after block ${proved.block.number}, the finalized block that was proved; at that block the project had nothing published` : `this version was published after block ${proved.block.number}, the finalized block that was proved; the version before it is proved` };
 }
 
-export { judge };
+// A rollup's verdict. Its state reaches Ethereum as claims, days apart from being final, so a proof here says
+// which claim the current root matches, and never stops a page:
+//   settled   the current root is the root at the L2 block of the newest claim that has become final
+//   claimed   it is the root at the L2 block of the rollup's newest claim, which is not final
+//   agreed    neither: published since the newest claim, or no proof could be made (the reason says which)
+// `anchor` and `latest` are { known: true, root, block } read by proof at those claims, { known: false, why }, or null.
+function judgeRollup({ anchor, latest, agreedHead }) {
+  if (anchor && anchor.known && anchor.root === agreedHead.root) return { state: 'settled', reason: `this is the project's root at block ${anchor.block.number}, the newest block whose state has become final on Ethereum` };
+  if (latest && latest.known && latest.root === agreedHead.root) return { state: 'claimed', reason: `this is the project's root at block ${latest.block.number}, the block of the newest claim posted to Ethereum; the claim is not final` };
+  const newest = (latest && latest.known && latest) || (anchor && anchor.known && anchor);
+  if (newest) return { state: 'agreed', reason: `this version was published after block ${newest.block.number}, the newest block a claim on Ethereum covers` };
+  return { state: 'agreed', reason: ((latest || anchor) && (latest || anchor).why) || 'no proof was attempted' };
+}
+
+export { judge, judgeRollup };

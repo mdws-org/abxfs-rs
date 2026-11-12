@@ -4,12 +4,15 @@ import { CHAINS, quantity, rpc } from './chain.js';
 import { hostLabel, parseHost, viewUrl } from './target.js';
 import { BEACONS, CHECKPOINTS } from './checkpoint.js';
 import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
-import { judge } from './verdict.js';
+import { judge, judgeRollup } from './verdict.js';
+import { baseClaims, baseTokenParam } from './base.js';
 import { BUILD } from './files.js';
 
 const $ = (s) => document.querySelector(s);
 const ZERO = '0x' + '0'.repeat(64);
-const MAX_LAG = { 1: 10, 11155111: 10 };
+const MAX_LAG = { 1: 10, 11155111: 10, 8453: 60 };
+// Rollups whose claims on Ethereum this viewer can read, and the chain those claims are on.
+const ROLLUPS = { 8453: { name: 'Base', l1: 1 } };
 const ago = (seconds) => (seconds < 90 ? `${Math.round(seconds)} seconds` : seconds < 5400 ? `${Math.round(seconds / 60)} minutes` : seconds < 172800 ? `${Math.round(seconds / 3600)} hours` : `${Math.round(seconds / 86400)} days`);
 const count = (n) => n.toLocaleString('en-US');
 
@@ -76,6 +79,7 @@ async function run() {
   if (head.root === ZERO) { $('#open').hidden = true; return say('none', 'This project has nothing published.'); }
   $('#open').hidden = !openUrl;
 
+  if (ROLLUPS[chain.id]) return rollup(chain, target, head);
   const cp = CHECKPOINTS[chain.id];
   if (!cp || !PROOF_ENDPOINTS[chain.id]) return say('agreed', 'Agreed by the endpoints. Not proved.', `This viewer has no light client for ${chain.name}. The root above is what ${head.sources.length} public endpoints agree on, and that is all that stands behind it.`);
   if (!await proofSwitch()) return say('agreed', 'Agreed by the endpoints. Proving is switched off.', 'The operator of this host has switched proving off, which is done when a fault is found in it. The root above is what the endpoints agree on.');
@@ -114,6 +118,44 @@ async function run() {
     agreed: 'Agreed by the endpoints. Not proved.',
   };
   if (v.state === 'mismatch') $('#open').hidden = true;
+  say(v.state, texts[v.state], v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.');
+}
+
+// A rollup: which of its claims on Ethereum the current root matches.
+async function rollup(chain, target, head) {
+  const { name, l1 } = ROLLUPS[chain.id];
+  const cp = CHECKPOINTS[l1];
+  if (!await proofSwitch()) return say('agreed', 'Agreed by the endpoints. Proving is switched off.', 'The operator of this host has switched proving off, which is done when a fault is found in it. The root above is what the endpoints agree on.');
+  say('working', 'Following Ethereum\'s sync committee to a finalized block…');
+  let claims, anchor = null, latest = null;
+  try {
+    const fin = await finalizedBlock({ chainId: l1, checkpoint: cp.root, beacons: BEACONS[l1] });
+    say('working', `Reading ${name}'s claims on Ethereum by proof…`);
+    claims = await baseClaims({ fin, urls: PROOF_ENDPOINTS[l1] });
+    say('working', `Reading the project's root on ${name} at the blocks those claims name…`);
+    const at = (claim) => (claim ? baseTokenParam({ claim, org: target.org, token: target.token }).catch((e) => ({ known: false, why: `the root at block ${claim.l2Block} could not be read by proof: ${e.message || e}` })) : null);
+    [anchor, latest] = await Promise.all([at(claims.anchor), at(claims.latest)]);
+  } catch (e) {
+    fact('Starting block', `Ethereum slot ${count(cp.slot)}, ${cp.date}`);
+    if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
+    return say('agreed', 'Agreed by the endpoints. Not proved.', `${name}'s claims on Ethereum could not be read by proof: ${e.message || e}`);
+  }
+  const now = Date.now() / 1000;
+  const line = (claim, got, what) => {
+    if (!claim) return fact(what, 'none that counts');
+    fact(what, `${name} block ${count(claim.l2Block)}, ${got && got.known ? ago(now - got.block.timestamp) + ' old' : 'claim posted ' + ago(now - claim.createdAt) + ' ago'}; game ${claim.proxy}`);
+    fact(`Root at that block`, got && got.known ? got.root : (got && got.why) || 'not read', Boolean(got && got.known));
+  };
+  line(claims.anchor, anchor, 'Final on Ethereum');
+  line(claims.latest, latest, 'Newest claim, not final');
+  fact('Claims read at', `Ethereum block ${count(claims.l1Block.number)}, finalized`);
+  fact('Starting block', `Ethereum slot ${count(cp.slot)}, ${cp.date}; trusted for 14 days`);
+  const v = judgeRollup({ anchor, latest, agreedHead: head });
+  const texts = {
+    settled: `Matches the state ${name} has made final on Ethereum: the endpoints' root is the project's root in that state.`,
+    claimed: `Matches ${name}'s newest claim on Ethereum, which is not final. The claim was accepted from ${name}'s own prover and can still be challenged.`,
+    agreed: 'Agreed by the endpoints. Not covered by any claim on Ethereum yet.',
+  };
   say(v.state, texts[v.state], v.reason.charAt(0).toUpperCase() + v.reason.slice(1) + '.');
 }
 

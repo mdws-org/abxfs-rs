@@ -31,5 +31,22 @@ for (const [name, input, want] of CASES) {
   if (got.state !== want || !got.reason) bad++;
   console.log(`${got.state === want && got.reason ? 'ok  ' : 'FAIL'} ${name}: ${got.state}${got.state === want ? '' : `, wanted ${want}`}`);
 }
-console.log(bad ? `${bad} FAILED` : `ok: ${CASES.length} verdict cases`);
+// Rollups.
+const { judgeRollup } = await import(process.argv[2] || '../site/verdict.js');
+const at = (root, number) => ({ known: true, root, block: { number } });
+const ROLLUP = [
+  ['the current root is the root at the final claim', { anchor: at(A, 10), latest: at(A, 90), agreedHead: head(A) }, 'settled'],
+  ['the current root is the root at the newest claim only', { anchor: at(B, 10), latest: at(A, 90), agreedHead: head(A) }, 'claimed'],
+  ['published since the newest claim', { anchor: at(B, 10), latest: at(C, 90), agreedHead: head(A) }, 'agreed'],
+  ['there is no newest claim that counts; the final one matches', { anchor: at(A, 10), latest: null, agreedHead: head(A) }, 'settled'],
+  ['there is no newest claim that counts; the final one differs', { anchor: at(B, 10), latest: null, agreedHead: head(A) }, 'agreed'],
+  ['the project did not exist at either claim', { anchor: { known: false, why: 'no contract' }, latest: { known: false, why: 'no contract' }, agreedHead: head(A) }, 'agreed'],
+  ['no proof could be made', { anchor: null, latest: null, agreedHead: head(A) }, 'agreed'],
+];
+for (const [name, input, want] of ROLLUP) {
+  const got = judgeRollup(input);
+  if (got.state !== want || !got.reason) bad++;
+  console.log(`${got.state === want && got.reason ? 'ok  ' : 'FAIL'} rollup: ${name}: ${got.state}${got.state === want ? '' : `, wanted ${want}`}`);
+}
+console.log(bad ? `${bad} FAILED` : `ok: ${CASES.length + ROLLUP.length} verdict cases`);
 process.exit(bad ? 1 : 0);

@@ -26,6 +26,10 @@ jobs:
         run: node tests/proof-replay.mjs
       - name: Proofs, each check removed in turn
         run: node tests/proof-mutants.mjs
+      - name: Base, each rule against a made-up Ethereum state, and a recorded read with lies
+        run: node tests/base-rules.mjs && node tests/base-replay.mjs
+      - name: Base, each rule removed in turn
+        run: node tests/base-mutants.mjs
       - name: Verdict rule
         run: node tests/verdict.mjs
       - name: Current-root rule and the stop-on-mismatch rule

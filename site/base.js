@@ -31,7 +31,6 @@ const IMPLEMENTATION_SLOT = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a92
 const SLOT = (n) => '0x' + word(n);
 // A game is this 98-byte clone of the implementation, then its arguments, then two bytes giving their length.
 const CLONE_HEAD = '36602c57343d527f9e4ac34f21c619cefc926c8bd93b54bf5a39c7ab2127a895af1cc0691d7e3dff593da1005b363d3d373d3d3d3d61030a806062363936013d73' + GAME_IMPL + '5af43d3d93803e606057fd5bf3';
-const CLONE_BYTES = 876;
 const STATUS = { inProgress: 0, challengerWins: 1, defenderWins: 2 };
 
 // Base (L2).
@@ -41,11 +40,13 @@ const BASE_PROOF_ENDPOINTS = ['https://base-mainnet.public.blastapi.io', 'https:
 
 // One game, proved: that it is a clone of the pinned implementation, what it claims, that the factory created
 // it, that the registry has not blacklisted or retired it, and where it stands.
-async function game({ fin, urls, proxy, retirementTimestamp }) {
+async function game({ fin, urls, proxy, retirementTimestamp, deps }) {
+  const { provedAccount, provedCode } = deps;
   const own = await provedAccount({ fin, urls, address: proxy, slots: [SLOT(0), SLOT(7)] });
   if (!own.exists) refuse(`there is no game at ${proxy}`);
   const code = (await provedCode({ urls, address: proxy, codeHash: own.codeHash, blockNumber: own.block.number })).slice(2);
-  if (code.length !== 2 * CLONE_BYTES || !code.startsWith(CLONE_HEAD) || parseInt(code.slice(-4), 16) !== CLONE_BYTES - CLONE_HEAD.length / 2) refuse(`the game at ${proxy} is not a clone of the implementation this viewer knows`);
+  // The code is bound by its proved hash, and what is read from it is bound again by the factory's record below.
+  if (!code.startsWith(CLONE_HEAD) || code.length < CLONE_HEAD.length + 2 * 136 + 4) refuse(`the game at ${proxy} is not a clone of the implementation this viewer knows`);
   const args = code.slice(CLONE_HEAD.length, -4);
   // creator (20 bytes), root claim (32), L1 parent hash (32), then the extra data: L2 block (32), parent game (20), intermediate roots.
   const rootClaim = '0x' + args.slice(40, 104), extra = args.slice(168), l2Block = BigInt('0x' + extra.slice(0, 64));
@@ -67,9 +68,9 @@ async function game({ fin, urls, proxy, retirementTimestamp }) {
 // The claims that count, proved at the Ethereum block `fin` names:
 //   anchor  the newest claim that has become final under Base's rules (a game that resolved in the claimant's favour)
 //   latest  the newest claim posted, if a proof was accepted for it and nobody has won a challenge to it; else null
-// `urls` are Ethereum proof endpoints.
-async function baseClaims({ fin, urls }) {
-  const read = (address, slots) => provedAccount({ fin, urls, address, slots });
+// `urls` are Ethereum proof endpoints. `deps` lets tests/base-rules.mjs supply a made-up Ethereum state.
+async function baseClaims({ fin, urls, deps = { provedAccount, provedCode } }) {
+  const read = (address, slots) => deps.provedAccount({ fin, urls, address, slots });
   const implementation = async (address, want, name, slots) => {
     const a = await read(address, [IMPLEMENTATION_SLOT, ...slots]);
     if (!a.exists) refuse(`${name} does not exist at the finalized block`);
@@ -88,7 +89,7 @@ async function baseClaims({ fin, urls }) {
   const count = BigInt(factory.words[1]);
   if (count === 0n) refuse('the factory has created no games');
 
-  const anchor = await game({ fin, urls, proxy: addressOf(registry.words[1]), retirementTimestamp });
+  const anchor = await game({ fin, urls, proxy: addressOf(registry.words[1]), retirementTimestamp, deps });
   if (anchor.status !== STATUS.defenderWins) refuse('the anchor game did not resolve in the claimant\'s favour');
 
   // The newest game in the factory's list. It counts only while unresolved with a proof accepted, or resolved
@@ -97,7 +98,7 @@ async function baseClaims({ fin, urls }) {
   const newest = BigInt((await read(FACTORY, ['0x' + word(BigInt(hash(word(104))) + count - 1n)])).words[0]);
   if (Number(newest >> 224n) === GAME_TYPE) {
     try {
-      const g = await game({ fin, urls, proxy: addressOf(word(newest)), retirementTimestamp });
+      const g = await game({ fin, urls, proxy: addressOf(word(newest)), retirementTimestamp, deps });
       if (g.status !== STATUS.challengerWins && g.proofCount >= 1 && g.l2Block >= anchor.l2Block) latest = g;
     } catch (e) { if (e.kind !== 'check') throw e; }
   }
@@ -106,7 +107,7 @@ async function baseClaims({ fin, urls }) {
 
 // A token parameter on Base at the L2 block a claim names. The claim is an output root:
 //   keccak(version 0 . L2 state root . storage root of the L2-to-L1 message passer . L2 block hash)
-// Its parts come from an untrusted Base endpoint and must hash to the claim. `urls` are Base proof endpoints.
+// Its parts come from an untrusted Base endpoint and must hash to the claim, which also settles which block it is. `urls` are Base proof endpoints.
 async function baseTokenParam({ claim, urls = BASE_PROOF_ENDPOINTS, org, token, key }) {
   const slots = paramSlots(token, key);
   const at = '0x' + claim.l2Block.toString(16);
@@ -116,7 +117,6 @@ async function baseTokenParam({ claim, urls = BASE_PROOF_ENDPOINTS, org, token, 
       const block = await call(url, 'eth_getBlockByNumber', [at, false]);
       if (!block || typeof block.hash !== 'string') throw new ProvedError('rpc', 'the endpoint has no such block');
       const header = executionHeader(block.hash, block);
-      if (header.number !== claim.l2Block) throw new ProvedError('check', 'the endpoint gave another block');
       const passer = await call(url, 'eth_getProof', [MESSAGE_PASSER, [], at]);
       const passerAccount = accountAt(header.stateRoot, MESSAGE_PASSER, passer.accountProof) || refuse('the message passer does not exist in that state');
       const outputRoot = hash(word(0), header.stateRoot, passerAccount.storageRoot, block.hash);

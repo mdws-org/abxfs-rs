@@ -133,7 +133,30 @@ The proof depends on three things:
 
 The host can switch proving off for every installed viewer by serving `{"proof": false}` at `/_abxfs/switch.json`. Use it if a fault is found in the proof code. A worker that has read the switch as off keeps proving off for as long as it runs. The switch cannot turn proving on, and it cannot change a verdict.
 
-Base, Arbitrum One and Robinhood Chain have no proof yet. The check page says "Agreed by the endpoints. Not proved." for projects on those chains.
+### Base
+
+Base's state reaches Ethereum as claims. Every 6,000 Base blocks a claim about Base's state is posted as a contract on Ethereum (a dispute game). A claim becomes final 5 days after it is posted if nobody wins a challenge to it. In the ten days measured, every claim carried one proof, from Base's own permissioned prover.
+
+`site/base.js` reads the claims by proof at the finalized Ethereum block of the section above:
+
+1. OptimismPortal2, AnchorStateRegistry and DisputeGameFactory are upgradeable. Each one's implementation address is proved and must be the one whose storage layout was read from verified source. After an upgrade nothing is claimed until `base.js` is brought up to date.
+2. The registry gives the anchor game (the newest claim that has become final), the respected game type, and the time before which games are retired. The factory gives the newest game.
+3. A game is a 98-byte clone of the AggregateVerifier implementation with its claim in its code. The game's code hash is proved, the code an endpoint gives must hash to it, and the claim and the Base block number are read from it. The factory's record of the game is proved, as are its status, that it is not blacklisted, and that it is not retired.
+4. A claim is an output root: `keccak(0 . state root . message passer storage root . block hash)`. The Base block's header, re-hashed, and the message passer's account proof must give the claimed output root. The project's root is then read by storage proof at that Base block, as on Ethereum.
+
+The check page compares the endpoints' current root with the root at each claim (`judgeRollup` in `site/verdict.js`):
+
+| The current root equals | Verdict |
+|---|---|
+| The root at the anchor claim | Matches the state Base has made final on Ethereum |
+| The root at the newest claim | Matches Base's newest claim on Ethereum, which is not final |
+| Neither | Agreed by the endpoints; published after the newest claim |
+
+A verdict on Base never stops a page. A claim that is not final rests on Base's own prover, and a final one is days old, so the page shown is always the current root the endpoints agree on.
+
+Proofs at the anchor's Base block need an endpoint that keeps state for 5 days. One public endpoint was found that does (`BASE_PROOF_ENDPOINTS` in `site/base.js`). If it does not answer, the anchor comparison is not made and the check page says so.
+
+Arbitrum One and Robinhood Chain have no proof yet. The check page says "Agreed by the endpoints. Not proved." for projects on those chains.
 
 What is left to trust, and how to reduce it:
 
@@ -170,9 +193,13 @@ node tests/light-mutants.mjs    # light.js with one check removed at a time; eac
 node tests/proof-replay.mjs     # recorded proofs from four chains, RLP cases, hand-built tries
 node tests/proof-mutants.mjs    # proof.js with one check removed at a time
 node tests/verdict.mjs          # the verdict table
+node tests/base-rules.mjs       # each rule for Base's contracts on Ethereum, against a made-up state
+node tests/base-replay.mjs      # a recorded read on Base at a claim's block, then one digit changed in every reply
+node tests/base-mutants.mjs     # base.js with one rule removed at a time
 node tests/settle.mjs           # the service worker stops on a mismatch and only on a mismatch
 node tests/light-live.mjs mainnet            # live: from a finalized root two beacon nodes report to an execution block
 node tests/proved-live.mjs                   # live: a project's root by proof through each proof endpoint
+node tests/base-live.mjs                     # live: Base's anchor and newest claims, and a project's root at each
 node tests/check-page.mjs                    # live: the check page in a browser (needs tools/view-serve.py running)
 LODESTAR_DIR=<dir> node tests/light-lodestar.mjs   # the same recordings and lies given to Lodestar's light client
 ```
