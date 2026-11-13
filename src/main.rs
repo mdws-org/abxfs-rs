@@ -8,6 +8,7 @@ use abxfs::chain::{chain_by_name, Client};
 use abxfs::hex::{parse_h256, to_hex};
 use abxfs::json::plan_json;
 use abxfs::plan::{plan_folder, PlanOptions};
+use abxfs::project::{bamfs_read, current_root, parse_label, Store};
 use abxfs::read::{read_tree, write_tree, Kind};
 use abxfs::scan::ScanOptions;
 use abxfs::verify::{verify, DiffKind};
@@ -15,6 +16,9 @@ use abxfs::verify::{verify, DiffKind};
 const USAGE: &str = "usage:
   abxfs-rs plan <folder> [--no-fastlz] [--include-hidden] [--no-empty-dirs] [--json]
   abxfs-rs read <root> --chain <name> [--rpc URL] [--out PATH] [--in-flight N]
+  abxfs-rs read <project> [--rpc URL] [--out PATH] [--in-flight N]
+  abxfs-rs root <project> [--rpc URL]
+  abxfs-rs serve [--port N] [--rpc URL]
   abxfs-rs verify <root> <local folder or file> --chain <name> [--rpc URL] [--in-flight N] [--include-hidden] [--no-fastlz]
 
 plan     Plans an ABX FS upload of <folder> offline: every chunk id, node, file CID, directory CID, the root,
@@ -27,6 +31,14 @@ plan     Plans an ABX FS upload of <folder> offline: every chunk id, node, file 
 read     Reads a file or directory root from chain, checking every directory CID, node id, file CID and chunk id
          against the bytes returned. With --out, writes a file root to PATH, or a directory root as a new
          directory at PATH; without it, prints a listing.
+
+root     Prints a project's current root. A project is <chain id>-<org contract>-<project number>, as the ABX FS
+         gateway names its hosts. The root is read from the chain's public endpoints at one block and taken only
+         when at least two answer and all agree; with --rpc, that endpoint alone is believed. No hash covers which
+         root is current: this says what the endpoints agree on, not a proof.
+
+serve    Serves projects on this machine at http://<project>.localhost:<port>/ (default port 8090), each file read
+         from chain and checked as read checks it. Answers only names under localhost.
 
 verify   Plans the local folder or file offline and compares its root with <root>. When they match, checks that
          every chunk, node, file and directory the plan needs exists on chain; when they differ, reads the chain
@@ -80,6 +92,8 @@ fn run(args: &[String]) -> Result<(), Fail> {
     match cmd.as_str() {
         "plan" => Ok(cmd_plan(rest)?),
         "read" | "verify" => chain_cmd(cmd, rest),
+        "root" => Ok(cmd_root(rest)?),
+        "serve" => Ok(cmd_serve(rest)?),
         _ => Err(Fail::Error(format!("unknown command \"{cmd}\"\n\n{USAGE}"))),
     }
 }
@@ -153,8 +167,25 @@ fn chain_cmd(cmd: &str, rest: &[String]) -> Result<(), Fail> {
     if pos.len() != want {
         return Err(Fail::Error(USAGE.into()));
     }
-    let root = parse_h256(pos[0]).map_err(|e| format!("root {}: {e}", pos[0]))?;
-    let chain = chain_by_name(chain.ok_or("--chain is required")?)?;
+    // A project name in place of a root: its current root, on its own chain.
+    let (root, chain) = match parse_label(pos[0]) {
+        Some(project) if cmd == "read" => {
+            let c = current_root(&project, rpc)?;
+            if c.root == [0u8; 32] {
+                return Err(Fail::Error(format!("{} has published nothing", project.label())));
+            }
+            if c.store == Store::Bamfs {
+                if out.is_none() {
+                    return Err(Fail::Error(format!("{} is on BAMFS: give --out to read it", project.label())));
+                }
+                eprintln!("{} is BAMFS root {} as {} agree at block {} (not proved)", project.label(), to_hex(&c.root), c.sources.join(", "), c.block);
+                return Ok(write_bamfs(&bamfs_read(&project, rpc, &c.root, abxfs::serve::MAX_TREE_BYTES)?, out.as_deref().expect("checked"))?);
+            }
+            eprintln!("{} is root {} as {} agree at block {} (not proved)", project.label(), to_hex(&c.root), c.sources.join(", "), c.block);
+            (c.root, project.chain)
+        }
+        _ => (parse_h256(pos[0]).map_err(|e| format!("root {}: {e}", pos[0]))?, chain_by_name(chain.ok_or("--chain is required")?)?),
+    };
     let t0 = Instant::now();
     let client = Client::connect(chain, rpc, in_flight)?;
     let result = if cmd == "read" { cmd_read(&client, &root, out) } else { cmd_verify(&client, &root, pos[1], &scan, &opts) };
@@ -174,6 +205,63 @@ fn chain_cmd(cmd: &str, rest: &[String]) -> Result<(), Fail> {
         );
     }
     result
+}
+
+fn write_bamfs(tree: &abxfs::bamfs::Tree, out: &std::path::Path) -> Result<(), String> {
+    if tree.is_file {
+        return std::fs::write(out, tree.files[0].content.as_slice()).map_err(|e| format!("{}: {e}", out.display()));
+    }
+    if out.exists() && std::fs::read_dir(out).map_err(|e| e.to_string())?.next().is_some() {
+        return Err(format!("{} exists and is not empty", out.display()));
+    }
+    std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    for d in &tree.dirs {
+        std::fs::create_dir_all(out.join(d)).map_err(|e| format!("{d}: {e}"))?;
+    }
+    let mut bytes = 0;
+    for f in &tree.files {
+        std::fs::write(out.join(&f.path), f.content.as_slice()).map_err(|e| format!("{}: {e}", f.path))?;
+        bytes += f.content.len();
+    }
+    for u in &tree.unusable {
+        eprintln!("not written (its name cannot be a path part): {u}");
+    }
+    println!("verified and wrote BAMFS generation {} ({} files, {bytes} bytes) to {}", tree.generation, tree.files.len(), out.display());
+    Ok(())
+}
+
+fn cmd_root(rest: &[String]) -> Result<(), String> {
+    let mut rpc: Option<&str> = None;
+    let mut label: Option<&str> = None;
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--rpc" => rpc = Some(it.next().ok_or("--rpc needs a value")?),
+            s if label.is_none() && !s.starts_with('-') => label = Some(s),
+            s => return Err(format!("unexpected argument \"{s}\"")),
+        }
+    }
+    let label = label.ok_or_else(|| USAGE.to_string())?;
+    let project = parse_label(label).ok_or_else(|| format!("{label} is not <chain id>-<org contract>-<project number>"))?;
+    let c = current_root(&project, rpc)?;
+    let store = if c.store == Store::Bamfs { "bamfs" } else { "abxfs" };
+    println!("{} {store} {}", to_hex(&c.root), c.block);
+    eprintln!("{}: {} root at block {}, as {} agree (not proved)", project.label(), store, c.block, c.sources.join(", "));
+    Ok(())
+}
+
+fn cmd_serve(rest: &[String]) -> Result<(), String> {
+    let mut port = 8090u16;
+    let mut rpc: Option<String> = None;
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--port" => port = it.next().ok_or("--port needs a value")?.parse().map_err(|_| "--port takes a number".to_string())?,
+            "--rpc" => rpc = Some(it.next().ok_or("--rpc needs a value")?.clone()),
+            s => return Err(format!("unexpected argument \"{s}\"")),
+        }
+    }
+    abxfs::serve::serve(port, rpc)
 }
 
 fn lossy(b: &[u8]) -> String {
