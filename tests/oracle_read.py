@@ -4,7 +4,7 @@
 The CLI's endpoint can be set with ABXFS_RPC_URL."""
 import os, subprocess, sys
 
-CLI = os.environ.get("ABXFS_CLI", "/Users/bemeadows/Projects/.lanes/abxfs-cli/node_modules/.bin/abxfs")
+CLI = os.environ.get("ABXFS_CLI", "abxfs")  # the official CLI, on PATH or named by ABXFS_CLI
 
 def cli(*args):
     r = subprocess.run([CLI, *args], capture_output=True)

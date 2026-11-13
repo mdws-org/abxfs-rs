@@ -7,7 +7,8 @@ import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 const [dir, tag] = process.argv.slice(2);
 if (process.env.LODESTAR_PRESET !== 'minimal') throw new Error('run with LODESTAR_PRESET=minimal');
-const mods = (process.env.LODESTAR_DIR || '/Users/bemeadows/Projects/.lanes/abxfs-p3-spike') + '/node_modules/@lodestar/';
+if (!process.env.LODESTAR_DIR) { console.log('set LODESTAR_DIR to a directory where `npm install @lodestar/light-client @lodestar/api @lodestar/config` was run'); process.exit(2); }
+const mods = process.env.LODESTAR_DIR + '/node_modules/@lodestar/';
 const { ssz } = await import(mods + 'types/lib/index.js');
 
 // Raw Snappy (no framing), as the spec tests store SSZ.

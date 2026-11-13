@@ -1,14 +1,16 @@
 // Token pages in a browser, against live chains: the page the viewer serves for a contract with no ABX FS root
 // must be exactly what the contract's tokenURI holds, as read here from another endpoint; and the check page
 // must say what stands behind it: on Ethereum, that the page was recomputed here from proved state and the
-// endpoints give the same; on a chain with no light client, that it is agreed and not proved.
+// endpoints give the same; on Base, that it was recomputed from the state of a claim on Ethereum, and not proved.
 // usage: tools/build-view.py && tools/view-serve.py &   then   CHROME_PATH=... node tests/token-page.mjs
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { GENERATORS, readTokenUri, abiString } from '../site/token.js';
-const require = createRequire(process.env.PLAYWRIGHT_DIR || '/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
+const require = createRequire(process.env.PLAYWRIGHT_DIR || process.cwd() + '/'); // PLAYWRIGHT_DIR: a node_modules directory that holds playwright-core
 const { chromium } = require('playwright-core');
 const port = process.argv[2] || '8853';
+// VIEW_HOST names a live host to test instead of the local build: https://<label>.<VIEW_HOST>/
+const at = (label) => (process.env.VIEW_HOST ? `https://${label}.${process.env.VIEW_HOST}/` : `http://${label}.localhost:${port}/`);
 const RPC = { 1: ['https://eth.drpc.org', 'https://rpc.mevblocker.io'], 8453: ['https://base.drpc.org', 'https://mainnet.base.org', 'https://base-mainnet.public.blastapi.io'] };
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const { keccak256 } = await import('../site/keccak-lookup.js');
@@ -47,16 +49,16 @@ for (const [name, chain, org, token, want] of CASES) {
   const label = `${chain}-${org}-${token}`;
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
-  await page.goto(`http://${label}.localhost:${port}/`);
+  await page.goto(at(label));
   // The start page registers the worker and reloads; then the worker answers.
   await page.waitForFunction(() => navigator.serviceWorker && navigator.serviceWorker.controller, null, { timeout: 60_000 }).catch(() => {});
   // The start page reloads itself once the worker controls it. Ask from the viewer's own info page, which stays put.
   await page.waitForTimeout(2500);
-  await page.goto(`http://${label}.localhost:${port}/_abxfs/info.html`);
+  await page.goto(`${at(label)}_abxfs/info.html`);
   const got = await page.evaluate(async () => { const r = await fetch('/', { cache: 'no-store' }); const b = new Uint8Array(await r.arrayBuffer()); return { status: r.status, type: r.headers.get('content-type'), agreed: r.headers.get('x-abxfs-agreed'), bytes: Array.from(b) }; });
   const other = await page.evaluate(async () => (await fetch('/anything-else', { cache: 'no-store' })).status);
   const check = await ctx.newPage();
-  await check.goto(`http://check.localhost:${port}/#${label}`);
+  await check.goto(`${at('check')}#${label}`);
   await check.waitForFunction(() => { const v = document.querySelector('#verdict'); return v && v.dataset.state !== 'working'; }, null, { timeout: 240_000 }).catch(() => {});
   const verdict = await check.evaluate(() => ({ state: document.querySelector('#verdict').dataset.state, text: document.querySelector('#verdict').textContent }));
   let ok, detail;
@@ -65,7 +67,7 @@ for (const [name, chain, org, token, want] of CASES) {
     detail = `served ${got.status}; check page: ${verdict.state} "${verdict.text}"`;
   } else {
     const same = ref.kind === 'page' && sha(Buffer.from(got.bytes)) === sha(Buffer.from(ref.bytes));
-    ok = same && got.status === 200 && (got.type || '').startsWith(want === 'generator' ? 'text/html' : want) && other === 404 && verdict.state === (chain === 1 ? 'proved' : 'agreed') && Boolean(got.agreed);
+    ok = same && got.status === 200 && (got.type || '').startsWith(want === 'generator' ? 'text/html' : want) && other === 404 && verdict.state === (chain === 1 ? 'proved' : 'recomputed') && !/^Proved|[^t] proved/i.test(chain === 1 ? '' : verdict.text) && Boolean(got.agreed);
     detail = `${got.bytes.length} bytes as ${got.type}, ${same ? 'equal to the reference' : 'DIFFERENT from the reference'}; another path ${other}; check page: ${verdict.state} "${verdict.text}"; agreed by ${got.agreed}`;
   }
   bad += !ok;

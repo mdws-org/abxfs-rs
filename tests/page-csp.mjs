@@ -2,7 +2,7 @@
 // content-security-policy violation, page error and the headers received (serve site/ with its _headers first).
 // usage: CHROME_PATH=... node tests/page-csp.mjs <page url> <folder> <chain value>
 import { createRequire } from 'node:module';
-const require = createRequire('/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
+const require = createRequire(process.env.PLAYWRIGHT_DIR || process.cwd() + '/'); // PLAYWRIGHT_DIR: a node_modules directory that holds playwright-core
 const { chromium } = require('playwright-core');
 const [url, folder, chain] = process.argv.slice(2);
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || undefined });

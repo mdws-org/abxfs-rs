@@ -5,7 +5,7 @@
 //      page must be served or the read refused, never the overwritten bytes.
 // usage: CHROME_PATH=... node tests/hostile-page.mjs http://<label>.localhost:8853/ <path of a file in the project>
 import { createRequire } from 'node:module';
-const require = createRequire('/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
+const require = createRequire(process.env.PLAYWRIGHT_DIR || process.cwd() + '/'); // PLAYWRIGHT_DIR: a node_modules directory that holds playwright-core
 const { chromium } = require('playwright-core');
 const [address, jsPath] = process.argv.slice(2);
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || undefined });

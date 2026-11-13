@@ -65,5 +65,24 @@ try {
     console.log(`${caught ? 'ok  ' : 'FAIL'} without ${name}: the comparison ${caught ? 'fails' : r.status === 0 ? 'still passes' : 'ended another way: ' + (r.stderr || '').trim().split('\n').pop()}`);
   }
 } finally { await rm(mutant, { force: true }); }
+// The rules for other chains: tests/evm-chains.mjs must fail without each.
+const CHAIN_MUTANTS = [
+  ['an opcode refused on a chain', "if (env.refused && env.refused.has(op)) return unsupported(", "if (false) return unsupported("],
+  ['the gas left being usable only by a call', "if (marks && marks.pop() && !gasUse) unsupported(", "if (marks && marks.pop() && false) unsupported("],
+  ['a copy of the gas left staying marked', "push(stack[stack.length - n], Boolean(marks && marks[marks.length - n]));", "push(stack[stack.length - n]);"],
+  ['a swapped gas value staying marked', " if (marks) [marks[t], marks[t - n]] = [marks[t - n], marks[t]];", ""],
+  ['one allowance for one pop', "    gasUse = false;\n    return stack.pop();", "    return stack.pop();"],
+  ['a contract built into a chain', "if (m.env.builtIn && m.env.builtIn(pre)) return unsupported(", "if (false) return unsupported("],
+];
+try {
+  for (const [name, find, put] of CHAIN_MUTANTS) {
+    if (src.split(find).length !== 2) { console.log(`FAIL ${name}: the line to change is in evm.js ${src.split(find).length - 1} times`); bad++; continue; }
+    await writeFile(mutant, src.replace(find, put));
+    const r = spawnSync(process.execPath, [join(root, 'tests/evm-chains.mjs'), '../site/evm.mutant.js'], { encoding: 'utf8' });
+    const caught = r.status === 1;
+    if (!caught) bad++;
+    console.log(`${caught ? 'ok  ' : 'FAIL'} without ${name}: the chain cases ${caught ? 'fail' : 'still pass'}`);
+  }
+} finally { await rm(mutant, { force: true }); }
 console.log(bad ? `${bad} of ${MUTANTS.length} changes NOT caught` : `ok: each of ${MUTANTS.length} changes to evm.js fails the comparison`);
 process.exit(bad ? 1 : 0);

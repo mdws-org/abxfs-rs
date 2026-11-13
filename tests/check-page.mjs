@@ -2,16 +2,20 @@
 // usage: tools/build-view.py && tools/view-serve.py &   then   CHROME_PATH=... node tests/check-page.mjs [port]
 //        CHECK_BASE=https://check.<host>/ CHROME_PATH=... node tests/check-page.mjs     the deployed page
 import { createRequire } from 'node:module';
-const require = createRequire(process.env.PLAYWRIGHT_DIR || '/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
+const require = createRequire(process.env.PLAYWRIGHT_DIR || process.cwd() + '/'); // PLAYWRIGHT_DIR: a node_modules directory that holds playwright-core
 const { chromium } = require('playwright-core');
 // CHECK_BASE names another check page, such as the deployed one: CHECK_BASE=https://check.fromchain.dynv6.net/
 const port = process.argv[2] || '8853';
-const base = process.env.CHECK_BASE || `http://check.localhost:${port}/`;
+// VIEW_HOST names a live host to test instead of the local build: https://check.<VIEW_HOST>/
+const base = process.env.VIEW_HOST ? `https://check.${process.env.VIEW_HOST}/` : process.env.CHECK_BASE || `http://check.localhost:${port}/`;
 const CASES = [
   ['an Ethereum project', '#1-e8978b5d18980fa16494fb83167c84cbbe9a6816-0', ['proved', 'newer']],
   ['a Base project', '#8453-ab025e1f9f469ae55e5f193ecdddaa1e0f4e2ff6-0', ['settled', 'claimed', 'agreed']],
   ['an Arbitrum One project', '#42161-4338cd826b34ccf3bd6b09c3c8d1a1794eb1400a-0', ['settled', 'agreed']],
   ['a Robinhood Chain project', '#4663-9e488d245f20fecb0210399b725ae0f0e9f5292b-0', ['settled', 'agreed']],
+  ['a token page on Ethereum', '#1-ff75c6d3d76fea5fa19f9a14422a87ee88717b5f-0', ['proved', 'newer']],
+  ['a token page on Base', '#8453-c4b6048ee69d445dcb63795b89121b40f085738a-0', ['recomputed', 'agreed']],
+  ['a token page on Arbitrum One', '#42161-6dd8e2d3ea605d6cc61f84896f967de476294b2e-0', ['recomputed', 'agreed']],
   ['an Ethereum contract that is not an ABX collection', '#1-c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2-0', ['agreed', 'unreachable', 'none']],
   ['a fixed root', '#r1-5wm4rku5u6ow2hylwi7igsn4mvs3aq4hilw4vgcnfp275atmoama', ['fixed']],
   ['no project named', '', ['none']],

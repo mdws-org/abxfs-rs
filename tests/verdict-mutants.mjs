@@ -16,6 +16,11 @@ const MUTANTS = [
   ['the finalized block not being ahead of the endpoints', 'near = behind >= 0 &&', 'near = behind >= -9 &&'],
   ['another reply at the same block being a warning', "return behind === 0 ? { state: 'differs',", "return false ? { state: 'differs',"],
   ['the calls the choice of page rested on', 'if (unsure) return', 'if (false) return'],
+  ['on a rollup: an endpoint that returns another reply being a warning', "if (other.length) return { state: 'differs',", "if (other.length > 99) return { state: 'differs',"],
+  ['on a rollup: a failing call', 'if (computed.success === false) return', 'if (false) return'],
+  ['on a rollup: the reply shown being the reply computed', "if (headReply !== computed.output) return { state: 'agreed', reason: atClaim.length ?", "if (false) return { state: 'agreed', reason: atClaim.length ?"],
+  ['on a rollup: the supporting calls', 'if (shaky) return', 'if (false) return'],
+  ['on a rollup: a call that was not run', 'if (!computed?.done) return', 'if (!computed) return'],
   ['a call that was not run', "if (!computed || !computed.done) return { state: 'agreed',", "if (!computed) return { state: 'agreed',"],
 ];
 const mutant = join(root, 'site/verdict.mutant.js');

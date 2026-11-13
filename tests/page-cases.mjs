@@ -2,7 +2,7 @@
 // must not be read, the size limit, a truncated Multicall3 reply, and a root lookup.
 // usage: node tests/page-cases.mjs <page url> <expected dirs-only root> <shot dir>
 import { createRequire } from 'node:module';
-const require = createRequire('/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
+const require = createRequire(process.env.PLAYWRIGHT_DIR || process.cwd() + '/'); // PLAYWRIGHT_DIR: a node_modules directory that holds playwright-core
 const { chromium } = require('playwright-core');
 const [url, dirsOnlyRoot, shots] = process.argv.slice(2);
 

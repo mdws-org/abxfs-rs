@@ -3,7 +3,7 @@
 // worker and reloads again, (3) asks for a file not requested before. Each must still be served from chain.
 // usage: CHROME_PATH=... node tests/host-gone.mjs http://<label>.localhost:<port>/ <pid of tools/view-serve.py>
 import { createRequire } from 'node:module';
-const require = createRequire('/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
+const require = createRequire(process.env.PLAYWRIGHT_DIR || process.cwd() + '/'); // PLAYWRIGHT_DIR: a node_modules directory that holds playwright-core
 const { chromium } = require('playwright-core');
 const [address, pid] = process.argv.slice(2);
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || undefined });

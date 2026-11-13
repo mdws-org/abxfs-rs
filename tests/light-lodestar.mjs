@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { NETWORKS, sync } from '../site/light.js';
 
 // Lodestar's files are imported by path: its packages are ES modules and do not export every file by name.
-const mods = (process.env.LODESTAR_DIR || '/Users/bemeadows/Projects/.lanes/abxfs-p3-spike') + '/node_modules/@lodestar/';
+if (!process.env.LODESTAR_DIR) { console.log('set LODESTAR_DIR to a directory where `npm install @lodestar/light-client @lodestar/api @lodestar/config` was run'); process.exit(2); }
+const mods = process.env.LODESTAR_DIR + '/node_modules/@lodestar/';
 const lib = mods + 'light-client/lib/';
 const { validateLightClientBootstrap } = await import(lib + 'spec/validateLightClientBootstrap.js');
 const spec = await import(lib + 'spec/validateLightClientUpdate.js');

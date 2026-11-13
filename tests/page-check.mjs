@@ -1,7 +1,7 @@
 // Drive the fs.abx page: pick a folder, read the root it computes, check it on a chain, and screenshot.
 // usage: node tests/page-check.mjs <page url> <folder> <chain value> <screenshot path> [light|dark]
 import { createRequire } from 'node:module';
-const require = createRequire('/Users/bemeadows/Projects/.lanes/abx-experiment/cli/node_modules/');
+const require = createRequire(process.env.PLAYWRIGHT_DIR || process.cwd() + '/'); // PLAYWRIGHT_DIR: a node_modules directory that holds playwright-core
 const { chromium } = require('playwright-core');
 const [url, folder, chain, shot, scheme = 'dark'] = process.argv.slice(2);
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || undefined });

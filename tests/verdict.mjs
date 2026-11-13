@@ -80,5 +80,25 @@ for (const [name, input, want] of COMPUTED) {
   if (got.state !== want || !got.reason || !said) bad++;
   console.log(`${got.state === want && got.reason ? 'ok  ' : 'FAIL'} computed: ${name}: ${got.state}${got.state === want ? '' : `, wanted ${want}`}`);
 }
-console.log(bad ? `${bad} FAILED` : `ok: ${CASES.length + ROLLUP.length + COMPUTED.length} verdict cases`);
+// Pages a contract computes on a rollup.
+const { judgeRollupComputed } = await import(process.argv[2] || '../site/verdict.js');
+const ON_ROLLUP = [
+  ['computed here to the reply shown, no endpoint keeps the block', { computed: ran('0xaa'), atClaim: [], headReply: '0xaa' }, 'recomputed', /not compared/],
+  ['computed here to the reply shown, one endpoint the same', { computed: ran('0xaa'), atClaim: [['a', '0xaa']], headReply: '0xaa' }, 'recomputed', /1 endpoint returned the same/],
+  ['an endpoint returns another reply at that block', { computed: ran('0xaa'), atClaim: [['a', '0xaa'], ['b', '0xbb']], headReply: '0xaa' }, 'differs', /b returns another/],
+  ['the call fails here and an endpoint returns a reply', { computed: ran('0x', false), atClaim: [['a', '0xaa']], headReply: '0xaa' }, 'differs', /a returns another/],
+  ['the call fails here, nothing to compare', { computed: ran('0x', false), atClaim: [], headReply: '0xaa' }, 'agreed', /fails/],
+  ['the reply now is another', { computed: ran('0xaa'), atClaim: [], headReply: '0xcc' }, 'agreed', /changed since that block, or this viewer computes it differently/],
+  ['the reply now is another, and an endpoint agreed at that block', { computed: ran('0xaa'), atClaim: [['a', '0xaa']], headReply: '0xcc' }, 'agreed', /which 1 endpoint also returned there.*the page changed since that block$/],
+  ['this EVM does not run the call', { computed: { done: false, why: 'opcode 0x43, which this viewer does not run on this chain' }, atClaim: [], headReply: '0xaa' }, 'agreed', /0x43/],
+  ['a supporting call did not come out the same', { computed: ran('0xaa'), atClaim: [], headReply: '0xaa', supporting: [{ ok: false, why: 'the status was not recomputed' }] }, 'agreed', /status/],
+  ['nothing was computed', { computed: null, atClaim: [], headReply: '0xaa' }, 'agreed', /not recomputed/],
+];
+for (const [name, input, want, says] of ON_ROLLUP) {
+  const got = judgeRollupComputed(input);
+  const ok = got.state === want && says.test(got.reason) && got.state !== 'proved';
+  if (!ok) bad++;
+  console.log(`${ok ? 'ok  ' : 'FAIL'} on a rollup: ${name}: ${got.state}${ok ? '' : `, wanted ${want} saying ${says}; said: ${got.reason}`}`);
+}
+console.log(bad ? `${bad} FAILED` : `ok: ${CASES.length + ROLLUP.length + COMPUTED.length + ON_ROLLUP.length} verdict cases`);
 process.exit(bad ? 1 : 0);

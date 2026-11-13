@@ -8,6 +8,8 @@ const require = createRequire(process.env.PLAYWRIGHT_DIR || process.cwd() + '/')
 const engines = require('playwright-core');
 const engine = process.env.ENGINE || 'chromium';
 const port = process.argv[2] || '8853';
+// VIEW_HOST names a live host to test instead of the local build: https://<label>.<VIEW_HOST>/
+const at = (label) => (process.env.VIEW_HOST ? `https://${label}.${process.env.VIEW_HOST}/` : `http://${label}.localhost:${port}/`);
 const label = '1-ff75c6d3d76fea5fa19f9a14422a87ee88717b5f-0'; // an SVG image token on Ethereum
 // Long waits are cut to half a second, so that the page's 200 second limit on a run is reached at once.
 const QUICK = () => { const real = window.setTimeout; window.setTimeout = (fn, ms, ...rest) => real(fn, ms >= 100_000 ? 500 : ms, ...rest); };
@@ -26,7 +28,7 @@ for (const [name, tamper, want, says, why] of CASES) {
   page.on('worker', (w) => workers.push(w.url()));
   if (tamper === 'switch') await page.route('**/_abxfs/switch.json', (route) => route.fulfill({ contentType: 'application/json', body: '{"proof": false}' }));
   else if (tamper) { await page.addInitScript(QUICK); await page.addInitScript(tamper); }
-  await page.goto(`http://check.localhost:${port}/#${label}`);
+  await page.goto(`${at('check')}#${label}`);
   await page.waitForFunction(() => { const v = document.querySelector('#verdict'); return v && v.dataset.state !== 'working'; }, null, { timeout: 240_000 }).catch(() => {});
   const got = await page.evaluate(() => ({ state: document.querySelector('#verdict').dataset.state, text: document.querySelector('#verdict').textContent, reason: document.querySelector('#reason').textContent, ended: window.__ended === true }));
   const ok = got.state === want && says.test(got.text) && (!why || why.test(got.reason)) && (tamper ? true : workers.some((u) => u.endsWith('/evm-worker.js'))) && (name.includes('never answers') ? got.ended : true) && (tamper === 'switch' ? workers.length === 0 : true);

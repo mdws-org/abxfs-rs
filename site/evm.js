@@ -120,6 +120,8 @@ async function message(m) {
   if (m.depth > MAX_DEPTH) return { success: false, output: new Uint8Array(0), gasLeft: m.gas };
   const pre = BigInt(m.codeAddress);
   if (pre === 0x100n) return unsupported('the precompiled contract at address 256 (P256VERIFY)');
+  // A chain may keep contracts of its own at low addresses, which are not code this EVM can run.
+  if (m.env.builtIn && m.env.builtIn(pre)) return unsupported(`a contract built into this chain, at address ${pre}`);
   if (pre >= 1n && pre <= 0x11n) {
     const p = PRECOMPILES[Number(pre)];
     if (!p) return unsupported(`the precompiled contract at address ${pre}`);
@@ -132,6 +134,8 @@ async function message(m) {
   m.counter.deadline += Date.now() - asked; // waiting for state is not running
   if (!code.length) return { success: true, output: new Uint8Array(0), gasLeft: m.gas };
   if (code.length >= 3 && code[0] === 0xef && code[1] === 0x01 && code[2] === 0x00) return unsupported('an account that delegates its code (EIP-7702)');
+  // No EVM code begins with 0xef. What does is something else a chain runs (a Stylus program on Arbitrum).
+  if (code[0] === 0xef) return unsupported('a program that is not EVM code');
   // A frame that fails forgets what it made warm.
   const mark = m.counter.warm.journal.length;
   const result = await execute(m, code);
@@ -145,8 +149,18 @@ async function execute(m, code) {
   const stack = [], memory = new Memory(), dests = jumpdests(code);
   let pc = 0, returndata = new Uint8Array(0), gas = m.gas;
   const self = BigInt(m.address);
-  const pop = () => { if (!stack.length) throw new EvmError('fault', 'stack underflow'); return stack.pop(); };
-  const push = (v) => { if (stack.length >= 1024) throw new EvmError('fault', 'stack overflow'); stack.push(v); };
+  // On a chain where the gas a call has is not what this EVM counts (env.gasOpaque), a value read with GAS is
+  // marked, and may only be dropped or handed to a call as its gas: anything else would make the result depend
+  // on a number this EVM does not have. `marks` runs beside the stack; `gasUse` allows the next pop to take one.
+  const marks = env.gasOpaque ? [] : null;
+  let gasUse = false;
+  const pop = () => {
+    if (!stack.length) throw new EvmError('fault', 'stack underflow');
+    if (marks && marks.pop() && !gasUse) unsupported('a use of the gas left other than passing it to a call, on a chain whose gas this viewer does not count');
+    gasUse = false;
+    return stack.pop();
+  };
+  const push = (v, mark = false) => { if (stack.length >= 1024) throw new EvmError('fault', 'stack overflow'); stack.push(v); if (marks) marks.push(mark); };
   let op = 0;
   const OUT = new EvmError('fault', 'out of gas');
   const use = (cost) => { gas -= cost; if (gas < 0n) throw OUT; };
@@ -170,6 +184,8 @@ async function execute(m, code) {
     if (pc >= code.length) return { success: true, output: new Uint8Array(0), gasLeft: gas };
     op = code[pc++];
     try {
+      // An opcode that means something else on this chain, or that the chain may not have, ends the run.
+      if (env.refused && env.refused.has(op)) return unsupported(`opcode 0x${op.toString(16).padStart(2, '0')}, which this viewer does not run on this chain`);
       const fixed = COST[op];
       if (fixed > 0) { gas -= BigInt(fixed); if (gas < 0n) return fail('out of gas'); }
       if (op >= 0x60 && op <= 0x7f) { // PUSH1..PUSH32
@@ -178,8 +194,8 @@ async function execute(m, code) {
         for (let i = 0; i < n; i++) v = (v << 8n) | BigInt(pc + i < code.length ? code[pc + i] : 0);
         pc += n; push(v); continue;
       }
-      if (op >= 0x80 && op <= 0x8f) { const n = op - 0x7f; if (stack.length < n) throw new EvmError('fault', 'stack underflow'); push(stack[stack.length - n]); continue; }
-      if (op >= 0x90 && op <= 0x9f) { const n = op - 0x8f; if (stack.length <= n) throw new EvmError('fault', 'stack underflow'); const t = stack.length - 1; [stack[t], stack[t - n]] = [stack[t - n], stack[t]]; continue; }
+      if (op >= 0x80 && op <= 0x8f) { const n = op - 0x7f; if (stack.length < n) throw new EvmError('fault', 'stack underflow'); push(stack[stack.length - n], Boolean(marks && marks[marks.length - n])); continue; }
+      if (op >= 0x90 && op <= 0x9f) { const n = op - 0x8f; if (stack.length <= n) throw new EvmError('fault', 'stack underflow'); const t = stack.length - 1; [stack[t], stack[t - n]] = [stack[t - n], stack[t]]; if (marks) [marks[t], marks[t - n]] = [marks[t - n], marks[t]]; continue; }
       switch (op) {
         case 0x00: return { success: true, output: new Uint8Array(0), gasLeft: gas }; // STOP
         case 0x01: push((pop() + pop()) & M256); break;
@@ -236,7 +252,7 @@ async function execute(m, code) {
         case 0x48: push(0n); break; // BASEFEE: a node runs a call that names no gas price with the base fee at zero
         case 0x49: pop(); push(0n); break; // BLOBHASH: a call carries no blobs
         case 0x4a: return unsupported('BLOBBASEFEE');
-        case 0x50: pop(); break;
+        case 0x50: gasUse = true; pop(); gasUse = false; break;
         case 0x51: { const offset = small(pop()); mem(offset, 32); push(toBig(memory.view(offset, 32))); break; }
         case 0x52: { const offset = small(pop()); mem(offset, 32); memory.write(offset, toBytes32(pop())); break; }
         case 0x53: { const offset = small(pop()); mem(offset, 1); memory.write(offset, Uint8Array.of(Number(pop() & 0xffn))); break; }
@@ -246,13 +262,14 @@ async function execute(m, code) {
         case 0x57: { const to = pop(), cond = pop(); if (cond !== 0n) { if (to >= BigInt(code.length) || !dests[Number(to)]) return fail(); pc = Number(to); } break; }
         case 0x58: push(BigInt(pc - 1)); break;
         case 0x59: push(BigInt(memory.size)); break;
-        case 0x5a: push(gas); break;
+        case 0x5a: push(gas, true); break;
         case 0x5b: break; // JUMPDEST
         case 0x5c: pop(); push(0n); break; // TLOAD: nothing was stored in this call, and TSTORE is refused
         case 0x5d: return unsupported('a write to transient storage (TSTORE)');
         case 0x5e: { const t = pop(), f = pop(), length = small(pop()), to = start(t, length), from = start(f, length); use(3n * words(length)); mem(Math.max(to, from), length); memory.write(to, memory.read(from, length)); break; }
         case 0x5f: push(0n); break;
         case 0xf1: case 0xf4: case 0xfa: { // CALL, DELEGATECALL, STATICCALL
+          gasUse = true;
           let asked = pop();
           const target = addressOf(pop());
           if (op === 0xf1 && pop() !== 0n) return unsupported('a call that sends value');
