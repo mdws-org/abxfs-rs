@@ -19,6 +19,7 @@ const PREFLIGHT_CODE: [(Address, &str); 4] =
     [(CHUNK_STORE, "ChunkStore"), (FILE_STORE, "FileStore"), (DIRECTORY_STORE, "DirectoryStore"), (MULTICALL3, "Multicall3")];
 
 /// A chain with the canonical deployment, and the public endpoint the SDK lists first for it.
+#[derive(Debug)]
 pub struct ChainInfo {
     pub name: &'static str,
     pub id: u64,

@@ -19,7 +19,11 @@ pub mod mime;
 pub mod nodes;
 pub mod plan;
 #[cfg(feature = "cli")]
+pub mod project;
+#[cfg(feature = "cli")]
 pub mod read;
+#[cfg(feature = "cli")]
+pub mod serve;
 #[cfg(feature = "cli")]
 pub mod rpc;
 pub mod scan;
