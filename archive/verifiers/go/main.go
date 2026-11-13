@@ -107,22 +107,24 @@ func runVerify(bundlePath, outDir string, hasOut bool) error {
 		return fmt.Errorf("%s is a directory", bundlePath)
 	}
 
+	if hasOut {
+		if err := checkOutDir(outDir); err != nil {
+			return err
+		}
+	}
+
 	indexData, rawOrder, rawMap, err := readContainer(f)
 	if err != nil {
 		return err
 	}
 
-	rootVal, hasDupKey, err := parseJSON(indexData)
+	rootVal, err := parseJSON(indexData)
 	if err != nil {
 		return err
 	}
 
 	if err := verifyLinkWalk(rootVal, rawOrder, rawMap); err != nil {
 		return err
-	}
-
-	if hasDupKey {
-		return rejectf("index", "duplicate key in JSON object")
 	}
 
 	idx, err := decodeIndex(rootVal, rawMap)

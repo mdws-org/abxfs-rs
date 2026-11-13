@@ -290,6 +290,18 @@ reject('bad-container-version', 'container', rebuild(tree.index, tree.blocks, { 
 { const i = clone(tree.index); i.root = hex(Z32); reject('bad-index-zero-root', 'index', rebuild(i)); }
 { const i = clone(tree.index); i.content.store = 'bamfs2'; reject('bad-index-store-for-key', 'index', rebuild(i)); }
 { const i = clone(tree.index); i.proof.endpoints = ['only.example']; reject('bad-index-one-endpoint', 'index', rebuild(i)); }
+{ const i = clone(tree.index); i.proof.endpoints = ['same.example', 'same.example']; reject('bad-index-repeated-endpoint', 'index', rebuild(i)); }
+{ const i = clone(tree.index); i.project.token = '07'; reject('bad-index-token-leading-zero', 'index', rebuild(i)); }
+{
+  // The same key twice in one object: parsers disagree about which value it has.
+  const text = canonical(tree.index).replace('{"content":', '{"content":{"store":"abxfs"},"content":');
+  reject('bad-index-duplicate-key', 'index', rebuild(tree.index, tree.blocks, { indexText: text }));
+}
+{
+  // An integer written with a fraction.
+  const text = canonical(tree.index).replace('"block":1000,', '"block":1000.0,');
+  reject('bad-index-fraction', 'index', rebuild(tree.index, tree.blocks, { indexText: text }));
+}
 // content
 { const i = clone(tree.index); i.content.files[0].outputHash = hex(K(enc.encode('x'))); reject('bad-content-file-record', 'content', rebuild(i)); }
 {

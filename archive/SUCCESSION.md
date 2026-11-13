@@ -38,6 +38,9 @@ The daily run needs a machine with Node 22 and a Rust toolchain, and an IPFS nod
 - **The light client's starting block is older than 14 days.** The Ethereum proof needs a recent starting block (`site/checkpoint.js`). The repository refreshes it each week. If that stops, take a finalized block root from any two Ethereum consensus nodes and put it in that file.
 - **Public endpoints disappear or refuse proofs.** Use any Ethereum and rollup node that serves `eth_getProof`, including your own: `tools/archive/proof.mjs` takes its endpoint lists from `site/proved.js`, `site/base.js` and `site/arbitrum.js`.
 - **Blockscout's API disappears.** Past versions are found from the collections' logs. Any explorer or archive node that returns `eth_getLogs` for the event in section 6.6 of the format can replace it.
+- **Ethereum adds a field to its block header.** Existing bundles still check: the format reads a header as a list of at least 15 items. New proofs fail with "the header does not rebuild to its hash", because `tools/archive/proof.mjs` and `site/proof.js` rebuild a header from a fixed list of fields. Add the new field to both lists, in the order the fork defines.
+- **Ethereum replaces its state tree.** Format 1 proves storage through Merkle-Patricia proofs. If Ethereum moves to another tree, no node can give those proofs for new blocks. Write a new format for the new proofs. Bundles of format 1 stay valid for the blocks they name.
+- **An endpoint for old logs stops answering.** The run reads each collection's logs from `LOG_RPCS` in `tools/archive/daily.mjs` (Base and Arbitrum One) and from Blockscout (Ethereum). Replace a dead one with any endpoint that serves `eth_getLogs` that far back. The run does not move past logs it could not read.
 - **The project contracts or the ABX FS stores are no longer served.** New bundles cannot be made. Existing bundles still check, because they hold every byte and every proof they need.
 
 ## License

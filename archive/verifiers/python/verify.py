@@ -21,7 +21,8 @@ MAX_CONTENT = 1 << 30
 MAX_ENTRIES = 65_536
 MAX_DEPTH = 64
 MAX_RAW_BLOCK = 1_048_576
-MAX_INDEX_BLOCK = 16_777_216
+MAX_INDEX_BLOCK = 1_048_576
+MAX_NODE_READS = 1_048_576
 UINT256_MOD = 1 << 256
 ZERO32 = bytes(32)
 
@@ -31,7 +32,7 @@ HEADER_PREFIX = bytes.fromhex("a265726f6f747381d82a582600")
 HEADER_SUFFIX = b"\x67version\x01"
 
 HEX_RE = re.compile(r"0x(?:[0-9a-f]{2})*\Z")
-DECIMAL_RE = re.compile(r"[0-9]+\Z")
+DECIMAL_RE = re.compile(r"(?:0|[1-9][0-9]*)\Z")
 CID_RE = re.compile(r"b[a-z2-7]+\Z")
 
 COLLECTION_CODE_HASH = bytes.fromhex(
@@ -346,8 +347,10 @@ def read_container(source: BinaryIO) -> tuple[bytes, dict[bytes, bytes]]:
 
 
 def text_cid(text: object) -> bytes:
+    require(isinstance(text, str), "index", "link CID must be a string")
+    require(len(text) == 59, "index", "incorrect link CID text length")
     require(
-        isinstance(text, str) and CID_RE.fullmatch(text) is not None,
+        CID_RE.fullmatch(text) is not None,
         "container", "invalid link CID text",
     )
     encoded = text[1:]
@@ -359,8 +362,9 @@ def text_cid(text: object) -> bytes:
 
     canonical = "b" + base64.b32encode(binary).decode("ascii").lower().rstrip("=")
     require(text == canonical, "container", "noncanonical link CID")
+    require(len(binary) == 36, "index", "incorrect link CID byte length")
     require(
-        len(binary) == 36 and binary.startswith(RAW_PREFIX),
+        binary.startswith(RAW_PREFIX),
         "container", "link does not name a raw SHA-256 CID",
     )
     return binary
@@ -370,14 +374,27 @@ def invalid_json_constant(_: str) -> object:
     raise Rejection("index", "non-JSON numeric constant")
 
 
+def invalid_json_fraction(_: str) -> object:
+    raise Rejection("index", "index numbers cannot have a fraction or exponent")
+
+
+def unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        require(key not in result, "index", "duplicate object member")
+        result[key] = value
+    return result
+
+
 def parse_json(data: bytes) -> object:
     try:
         text = data.decode("utf-8")
         require(not text.startswith("\ufeff"), "index", "JSON has a BOM")
         return json.loads(
             text,
+            object_pairs_hook=unique_json_object,
             parse_int=Decimal,
-            parse_float=Decimal,
+            parse_float=invalid_json_fraction,
             parse_constant=invalid_json_constant,
         )
     except (UnicodeDecodeError, json.JSONDecodeError, InvalidOperation):
@@ -519,7 +536,12 @@ def byte_string(value: object, raw: dict[bytes, bytes]) -> Blob:
 
 
 def proof_nodes(value: object) -> list[bytes]:
-    return [hex_bytes(node) for node in array(value)]
+    nodes = array(value)
+    require(
+        1 <= len(nodes) <= 64,
+        "index", "trie proof must have 1 to 64 nodes",
+    )
+    return [hex_bytes(node) for node in nodes]
 
 
 def account_schema(value: object) -> dict:
@@ -569,8 +591,8 @@ def agreed_endpoints(value: object) -> list[str]:
             "index", "endpoint host cannot be listed unambiguously",
         )
     require(
-        len(set(endpoints)) >= 2,
-        "index", "agreed needs at least two distinct endpoint names",
+        len(set(endpoints)) == len(endpoints),
+        "index", "agreed endpoint names must all be different",
     )
     return endpoints
 
@@ -604,12 +626,18 @@ def proof_schema(value: object) -> dict:
     if kind == "arbitrum":
         obj = object_fields(value, ("kind", "l1", "log", "l2"))
         log = object_fields(obj["log"], ("parent", "data"))
+        log_data = hex_bytes(log["data"])
+        require(
+            len(log_data) % 32 == 0
+            and 20 * 32 <= len(log_data) <= 40 * 32,
+            "index", "assertion log data is not 20 to 40 words",
+        )
         return {
             "kind": kind,
             "l1": layer_schema(obj["l1"]),
             "log": {
                 "parent": hex_bytes(log["parent"], 32),
-                "data": hex_bytes(log["data"]),
+                "data": log_data,
             },
             "l2": layer_schema(obj["l2"]),
         }
@@ -667,6 +695,10 @@ def file_schema(value: object, store: str, raw: dict[bytes, bytes]) -> dict:
     }
 
     if store == "abxfs":
+        require(
+            1 <= result["mime"].length <= 127,
+            "index", "ABX FS MIME length is out of range",
+        )
         result["codec"] = hex_bytes(obj["codec"], 32)
         encoded = result["codec"] != ZERO32
     else:
@@ -862,6 +894,15 @@ def rlp_integer(value: object) -> int:
     return int.from_bytes(value, "big")
 
 
+def read_storage_word(value: bytes) -> int:
+    integer = decode_rlp(value)
+    require(
+        isinstance(integer, bytes) and bool(integer),
+        "proof", "storage word must be a nonempty RLP integer",
+    )
+    return rlp_integer(integer)
+
+
 @dataclass(frozen=True)
 class Header:
     state_root: bytes
@@ -902,7 +943,10 @@ def hex_prefix(value: object) -> tuple[bool, tuple[int, ...]]:
     odd = flag & 1
     require(odd != 0 or value[0] & 15 == 0, "proof", "nonzero hex-prefix padding")
     decoded = nibbles(value)
-    return bool(flag & 2), decoded[1:] if odd else decoded[2:]
+    leaf = bool(flag & 2)
+    path = decoded[1:] if odd else decoded[2:]
+    require(leaf or bool(path), "proof", "extension path is empty")
+    return leaf, path
 
 
 def check_child_reference(reference: object, embedded: list[RLPList]) -> None:
@@ -920,7 +964,7 @@ def check_child_reference(reference: object, embedded: list[RLPList]) -> None:
     embedded.append(reference)
 
 
-def validate_trie_node(root: object) -> None:
+def validate_trie_node(root: object, *, storage: bool = False) -> None:
     pending = [root]
     while pending:
         node = pending.pop()
@@ -934,9 +978,11 @@ def validate_trie_node(root: object) -> None:
             leaf, _ = hex_prefix(node[0])
             if leaf:
                 require(
-                    isinstance(node[1], bytes),
-                    "proof", "leaf value is not a string",
+                    isinstance(node[1], bytes) and bool(node[1]),
+                    "proof", "leaf value is not a nonempty string",
                 )
+                if storage:
+                    read_storage_word(node[1])
             else:
                 check_child_reference(node[1], pending)
 
@@ -969,12 +1015,18 @@ def trie_result(
     return value
 
 
-def verify_trie(root: bytes, key: bytes, proof: list[bytes]) -> bytes | None:
-    require(1 <= len(proof) <= 64, "proof", "trie proof must have 1 to 64 nodes")
+def verify_trie(
+    root: bytes,
+    key: bytes,
+    proof: list[bytes],
+    *,
+    storage: bool = False,
+) -> bytes | None:
+    require(1 <= len(proof) <= 64, "index", "trie proof must have 1 to 64 nodes")
     require(H(proof[0]) == root, "proof", "trie root hash mismatch")
     decoded = [decode_rlp(node) for node in proof]
     for node in decoded:
-        validate_trie_node(node)
+        validate_trie_node(node, storage=storage)
 
     path = nibbles(H(key))
     consumed = 0
@@ -1017,6 +1069,7 @@ def read_account(value: bytes) -> Account:
         isinstance(items, RLPList) and len(items) == 4,
         "proof", "account is not a four-item RLP list",
     )
+    # Nonce and balance may use all 32 bytes; only their RLP form is checked.
     rlp_integer(items[0])
     rlp_integer(items[1])
     require(
@@ -1056,8 +1109,10 @@ class Evidence:
             for entry in record["storage"]:
                 slot = entry["slot"]
                 require(slot not in slots, "proof", "duplicate storage slot")
-                result = verify_trie(account.storage_root, slot, entry["proof"])
-                slots[slot] = 0 if result is None else rlp_integer(decode_rlp(result))
+                result = verify_trie(
+                    account.storage_root, slot, entry["proof"], storage=True
+                )
+                slots[slot] = 0 if result is None else read_storage_word(result)
 
     def account(self, address: bytes) -> Account | None:
         require(address in self.accounts, "proof", "required account evidence missing")
@@ -1124,22 +1179,20 @@ def check_parameter(
     if account is None:
         return
 
-    collection_code_matches = account.code_hash == COLLECTION_CODE_HASH
-    checks.param(collection_code_matches, "collection code hash mismatch")
-    if not collection_code_matches:
+    checks.param(
+        account.code_hash == COLLECTION_CODE_HASH,
+        "collection code hash mismatch",
+    )
+    if account.code_hash != COLLECTION_CODE_HASH:
         return
 
     value_slot, flags_slot = parameter_slots(project)
     flags = evidence.get_word(address, flags_slot)
-    valid_flags = flags >> 16 == 0 and flags & 0x100 != 0 and flags & 1 == 0
-    checks.param(
-        valid_flags,
-        "token parameter flags do not satisfy the parameter rule",
-    )
-    if not valid_flags:
-        return
-
     value = evidence.get_word(address, value_slot)
+    checks.param(
+        flags == 0x0100,
+        "token parameter flags must equal 0x0100",
+    )
     checks.param(value == int.from_bytes(root, "big"), "token parameter root mismatch")
 
 
@@ -1342,11 +1395,6 @@ def arbitrum_log(
     log: dict, assertion: bytes, l2: Header, checks: SemanticChecks
 ) -> None:
     data = log["data"]
-    valid_length = len(data) % 32 == 0 and 20 * 32 <= len(data) <= 40 * 32
-    checks.binding(valid_length, "assertion log data is not 20 to 40 words")
-    if not valid_length:
-        return
-
     after = data[13 * 32:19 * 32]
     accumulator = data[19 * 32:20 * 32]
     checks.binding(
@@ -1512,14 +1560,23 @@ class ContentVerifier:
         self.active_dirs: set[bytes] = set()
         self.node_cache: dict[tuple[bytes, bytes], bytes] = {}
         self.chunk_cache: dict[bytes, Blob] = {}
-        self.file_cache: dict[bytes, Blob] = {}
+        self.file_cache: dict[bytes, tuple[Blob, int]] = {}
         self.listing: list[ListedEntry] = []
         self.entry_count = 0
         self.file_count = 0
         self.byte_count = 0
+        self.node_read_count = 0
         self.root_is_file = False
 
+    def count_node_reads(self, count: int = 1) -> None:
+        self.node_read_count += count
+        require(
+            self.node_read_count <= MAX_NODE_READS,
+            "content", "content exceeds 1,048,576 node reads",
+        )
+
     def node_blob(self, cid: bytes, prefix: bytes, expected_level: int | None) -> bytes:
+        self.count_node_reads()
         require(cid in self.nodes, "content", "missing content tree node")
         self.seen_nodes.add(cid)
         key = (prefix, cid)
@@ -1639,7 +1696,6 @@ class ContentVerifier:
 
     def abx_file(self, entry: dict) -> Blob:
         mime = entry["mime"]
-        require(1 <= mime.length <= 127, "content", "ABX FS MIME length is out of range")
         codec = entry["codec"]
         require(
             (codec == ZERO32) == (entry["outputHash"] == ZERO32),
@@ -1699,11 +1755,16 @@ class ContentVerifier:
     def file_data(self, cid: bytes) -> Blob:
         require(cid in self.files, "content", "missing file CID")
         self.seen_files.add(cid)
-        if cid not in self.file_cache:
-            entry = self.files[cid]
-            data = self.abx_file(entry) if self.store == "abxfs" else self.bamfs_file(entry)
-            self.file_cache[cid] = data
-        return self.file_cache[cid]
+        if cid in self.file_cache:
+            data, reads = self.file_cache[cid]
+            self.count_node_reads(reads)
+            return data
+
+        before = self.node_read_count
+        entry = self.files[cid]
+        data = self.abx_file(entry) if self.store == "abxfs" else self.bamfs_file(entry)
+        self.file_cache[cid] = (data, self.node_read_count - before)
+        return data
 
     def count_entry(self) -> None:
         self.entry_count += 1
@@ -1767,9 +1828,10 @@ class ContentVerifier:
         self.listing.sort(key=lambda entry: entry.sort_path.encode("ascii"))
 
 
-# Listing and extraction. Existing files are never overwritten. Directory file
-# descriptors prevent an existing symlink beneath the destination from being
-# followed. Raw non-UTF-8 ABX FS names require a POSIX filesystem interface.
+# Listing and extraction. The destination must be new or empty. Existing files
+# are never overwritten. Directory file descriptors prevent an existing symlink
+# beneath the destination from being followed. Raw non-UTF-8 ABX FS names require
+# a POSIX filesystem interface.
 
 
 def make_listing(index: dict, binding: list[str], content: ContentVerifier) -> bytes:
@@ -1834,6 +1896,9 @@ def extract_directory(destination: str, entries: list[ListedEntry]) -> None:
         destination_bytes, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     )
     try:
+        if os.listdir(root_fd):
+            raise OSError("output directory must be empty")
+
         for entry in entries:
             names = entry.names if entry.data is None else entry.names[:-1]
             directory_fd = open_child_directory(root_fd, names)
@@ -1877,9 +1942,9 @@ def main(argv: list[str] | None = None) -> int:
             index_data, raw = read_container(source)
 
         parsed = parse_json(index_data)
-        check_raw_walk(parsed, raw)
         check_json_values(parsed)
         index = index_schema(parsed, raw)
+        check_raw_walk(parsed, raw)
 
         binding = verify_binding(index["proof"], index["project"], index["root"])
         content = ContentVerifier(index["content"], extracting=args.out is not None)

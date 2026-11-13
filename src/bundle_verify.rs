@@ -36,6 +36,7 @@ impl<T> Class<T> for std::result::Result<T, String> {
 const MAX_TOTAL: usize = 1 << 30;
 const MAX_DEPTH: usize = 64;
 const MAX_ENTRIES: usize = 65_536;
+const MAX_READS: usize = 1_048_576;
 
 fn h(x: &[u8]) -> String {
     crate::hex::to_hex(x)
@@ -89,6 +90,10 @@ impl Ix<'_> {
                 for l in a {
                     let cid = link(l).ok_or_else(|| Reject { class: "index", message: format!("{what} holds something that is not a link") })?;
                     let b = self.blocks.get(&cid).ok_or_else(|| Reject { class: "container", message: format!("{what} links a block the bundle lacks") })?;
+                    // One block may be linked many times: stop before the value outgrows what any bundle may hold.
+                    if out.len() + b.len() > MAX_TOTAL {
+                        return fail("content", format!("{what} is more than 1 GiB"));
+                    }
                     out.extend_from_slice(b);
                 }
                 Ok(out)
@@ -106,6 +111,72 @@ fn link(v: &Value) -> Option<Vec<u8>> {
     car::cid_from_text(o.get("/")?.as_str()?)
 }
 
+/// The index as JSON, refusing what section 2 refuses: a key twice in one object, and a number with a fraction or
+/// an exponent (or too large for an integer).
+fn parse_index(b: &[u8]) -> std::result::Result<Value, String> {
+    use serde::de::{DeserializeSeed, Deserializer, Error, MapAccess, SeqAccess, Visitor};
+    struct Strict;
+    impl<'de> DeserializeSeed<'de> for Strict {
+        type Value = Value;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> std::result::Result<Value, D::Error> {
+            d.deserialize_any(Strict)
+        }
+    }
+    impl<'de> Visitor<'de> for Strict {
+        type Value = Value;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("JSON")
+        }
+        fn visit_bool<E>(self, v: bool) -> std::result::Result<Value, E> {
+            Ok(Value::Bool(v))
+        }
+        fn visit_u64<E>(self, v: u64) -> std::result::Result<Value, E> {
+            Ok(Value::from(v))
+        }
+        fn visit_i64<E>(self, v: i64) -> std::result::Result<Value, E> {
+            Ok(Value::from(v))
+        }
+        fn visit_f64<E: Error>(self, _: f64) -> std::result::Result<Value, E> {
+            Err(E::custom("a number has a fraction or an exponent, or is too large"))
+        }
+        fn visit_str<E>(self, v: &str) -> std::result::Result<Value, E> {
+            Ok(Value::String(v.to_string()))
+        }
+        fn visit_unit<E>(self) -> std::result::Result<Value, E> {
+            Ok(Value::Null)
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> std::result::Result<Value, A::Error> {
+            let mut out = Vec::new();
+            while let Some(v) = a.next_element_seed(Strict)? {
+                out.push(v);
+            }
+            Ok(Value::Array(out))
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> std::result::Result<Value, A::Error> {
+            let mut out = Map::new();
+            while let Some(k) = a.next_key::<String>()? {
+                if out.contains_key(&k) {
+                    return Err(A::Error::custom(format!("the key {k:?} appears twice in one object")));
+                }
+                let v = a.next_value_seed(Strict)?;
+                out.insert(k, v);
+            }
+            Ok(Value::Object(out))
+        }
+    }
+    let mut de = serde_json::Deserializer::from_slice(b);
+    let v = Strict.deserialize(&mut de).map_err(|e| e.to_string())?;
+    de.end().map_err(|e| e.to_string())?;
+    Ok(v)
+}
+
+/// An object's values in ascending order of their keys' bytes, whatever order the map keeps them in.
+fn sorted_values(o: &Map<String, Value>) -> Vec<&Value> {
+    let mut kv: Vec<(&String, &Value)> = o.iter().collect();
+    kv.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+    kv.into_iter().map(|x| x.1).collect()
+}
+
 /// Every link anywhere in the index (section 1: each must name a block, and each block must be named).
 fn links(v: &Value, out: &mut Vec<Vec<u8>>) -> R<()> {
     match v {
@@ -113,7 +184,7 @@ fn links(v: &Value, out: &mut Vec<Vec<u8>>) -> R<()> {
             Some(c) => out.push(c),
             None => return fail("container", "a link is not a CID in text form"),
         },
-        Value::Object(o) => o.values().try_for_each(|x| links(x, out))?,
+        Value::Object(o) => sorted_values(o).into_iter().try_for_each(|x| links(x, out))?,
         Value::Array(a) => a.iter().try_for_each(|x| links(x, out))?,
         _ => {}
     }
@@ -322,14 +393,8 @@ fn param_rule(acc: &Accounts, org: &[u8; 20], token: &H256, key: &str, root: &H2
     }
     let (vs, fs) = param_slots(token, key);
     let flags = acc.word(org, &fs)?;
-    if flags[..30].iter().any(|&b| b != 0) {
-        return fail("param", "the parameter's flags word holds more than two flags");
-    }
-    if flags[30] & 1 != 1 {
-        return fail("param", "the parameter is not set");
-    }
-    if flags[31] & 1 != 0 {
-        return fail("param", "the parameter's value is a hash, not the root");
+    if flags != word_u64(0x0100) {
+        return fail("param", format!("the parameter's flags are {}, not set-and-not-a-hash (0x0100)", h(&flags)));
     }
     let v = acc.word(org, &vs)?;
     if v != *root {
@@ -401,8 +466,9 @@ fn binding(ix: &Ix, p: &Project, root: &H256, v: &Value) -> R<Binding> {
             let block = uint(&o["block"], "the block")?;
             let eps = o["endpoints"].as_array().ok_or_else(|| Reject { class: "index", message: "endpoints is not a list".into() })?;
             let eps: Vec<String> = eps.iter().map(|e| e.as_str().map(str::to_string).ok_or_else(|| Reject { class: "index", message: "an endpoint is not a string".into() })).collect::<R<_>>()?;
-            if eps.len() < 2 || eps.iter().any(|e| e.is_empty() || e.contains([',', ' ', '\n'])) {
-                return fail("index", "an agreed proof names fewer than two endpoints, or one that cannot be listed");
+            let distinct: HashSet<&String> = eps.iter().collect();
+            if eps.len() < 2 || distinct.len() != eps.len() || eps.iter().any(|e| e.is_empty() || e.contains([',', ' ', '\n'])) {
+                return fail("index", "an agreed proof names fewer than two different endpoints, or one that cannot be listed");
             }
             Ok(Binding { anchor: None, l2: None, agreed: Some((block, eps)), logged: None })
         }
@@ -585,6 +651,7 @@ struct Content<'a> {
     on_path: HashSet<H256>,
     total: usize,
     entries: usize,
+    reads: usize,
     items: Vec<Item>,
 }
 
@@ -631,6 +698,10 @@ impl<'a> Content<'a> {
     }
 
     fn node(&mut self, id: &H256, prefix: u8, level: Option<u8>) -> R<Vec<u8>> {
+        self.reads += 1;
+        if self.reads > MAX_READS {
+            return fail("content", "the content needs more than 1,048,576 node reads");
+        }
         let blob = self.nodes.get(id).cloned().ok_or_else(|| Reject { class: "content", message: format!("node {} is not in the bundle", h(id)) })?;
         if keccak256(&[&[prefix][..], &blob].concat()) != *id {
             return fail("content", format!("node {}: its blob does not hash to its id", h(id)));
@@ -960,7 +1031,7 @@ pub struct Verified {
 
 pub fn verify(bundle: &[u8]) -> R<Verified> {
     let parsed = car::read(bundle).class("container")?;
-    let index: Value = serde_json::from_slice(parsed.index).map_err(|e| Reject { class: "index", message: format!("the index is not JSON: {e}") })?;
+    let index: Value = parse_index(parsed.index).map_err(|e| Reject { class: "index", message: format!("the index is not JSON this format accepts: {e}") })?;
     if parsed.index.starts_with(&[0xef, 0xbb, 0xbf]) {
         return fail("index", "the index starts with a byte-order mark");
     }
@@ -1036,6 +1107,7 @@ pub fn verify(bundle: &[u8]) -> R<Verified> {
         on_path: HashSet::new(),
         total: 0,
         entries: 0,
+        reads: 0,
         items: Vec::new(),
     };
     if c.dirs.keys().any(|k| c.files.contains_key(k)) {
@@ -1107,17 +1179,22 @@ pub fn write_files(v: &Verified, dir: &Path) -> std::result::Result<(), String> 
             return Err("a name cannot be written as a path part (empty, ., .., or holding / or a zero byte)".into());
         }
     }
+    if dir.exists() && std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.next().is_some() {
+        return Err(format!("{} exists and is not empty", dir.display()));
+    }
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    // Into a directory that was empty, creating every file anew: nothing is followed or written over.
+    let create = |p: std::path::PathBuf, b: &[u8]| -> std::result::Result<(), String> {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        f.write_all(b).map_err(|e| e.to_string())
+    };
     let path_of = |p: &[Vec<u8>]| p.iter().fold(dir.to_path_buf(), |acc, n| acc.join(std::ffi::OsStr::from_bytes(n)));
     for d in &v.dirs {
-        std::fs::create_dir_all(path_of(d)).map_err(|e| e.to_string())?;
+        std::fs::create_dir(path_of(d)).map_err(|e| e.to_string())?;
     }
     for (p, b) in &v.files {
-        if p.is_empty() {
-            std::fs::write(dir.join("file"), b).map_err(|e| e.to_string())?;
-        } else {
-            std::fs::write(path_of(p), b).map_err(|e| e.to_string())?;
-        }
+        create(if p.is_empty() { dir.join("file") } else { path_of(p) }, b)?;
     }
     Ok(())
 }

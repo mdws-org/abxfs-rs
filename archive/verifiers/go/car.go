@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	maxIndexBlockSize = 16_777_216
+	maxIndexBlockSize = 1_048_576
 	maxRawBlockSize   = 1_048_576
 )
 
@@ -59,7 +59,7 @@ func readContainer(f *os.File) ([]byte, [][36]byte, map[[36]byte][]byte, error) 
 	}
 	indexDataLen := firstBlkLen - 37
 	if indexDataLen > maxIndexBlockSize {
-		return nil, nil, nil, rejectf("container", "index block exceeds 16 MiB")
+		return nil, nil, nil, rejectf("container", "index block exceeds 1 MiB")
 	}
 
 	var gotIndexCID [37]byte

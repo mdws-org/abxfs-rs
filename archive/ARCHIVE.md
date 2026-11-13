@@ -5,7 +5,7 @@ An archive bundle holds one version of one ABX project, every byte of its files,
 A bundle proves two things, and says which of them it could prove:
 
 1. **Content.** The files are exactly the content the root names. This rests only on keccak-256 and is always proved.
-2. **Binding.** The project's token parameter held that root at a block, which rests on Merkle proofs up to one Ethereum block hash (the **anchor**). A verifier cannot know that the anchor is on the canonical chain; it prints the anchor's number and hash, and the reader compares them with any Ethereum explorer or node. A bundle of kind `agreed` (section 6.5) has no binding proof and says so.
+2. **Binding.** The project's token parameter held that root at a block, which rests on Merkle proofs up to one Ethereum block hash (the **anchor**). A verifier cannot know that the anchor is a block of Ethereum at all: a header carries no chain id, and anyone can make a header with any state under it. It prints the anchor's number and hash, and the proof means something only once the reader has confirmed that the finalized block of Ethereum mainnet at that number has that hash (section 6.4). Bundles of kind `agreed` and `logged` (sections 6.5 and 6.6) have no binding proof and say so.
 
 Notation: `H(x)` is keccak-256 (the original Keccak padding, as Ethereum uses, not SHA3-256). `‖` is concatenation. `word(n)` is n as a 32-byte big-endian integer. `u16`, `u48` are big-endian unsigned integers of 2 and 6 bytes. Hex in this document and in bundles is lowercase with a `0x` prefix. An *address* is 20 bytes; the address in a storage word is its low 20 bytes (bytes 12..32), and its high 12 bytes are not checked unless a rule says so. Bit `n` of a word is counted from the least significant bit.
 
@@ -48,14 +48,14 @@ Rules (each failure is class `container`):
 - The first block is the index block, and its CID is the one in the header. Every other block is raw.
 - `sha256(data)` equals the digest in each block's CID.
 - Raw blocks follow the index block in the order a walk of the index first reaches a link to each, with no CID twice. The walk takes an object's members in ascending order of their keys' UTF-8 bytes and an array's items in order, and descends into each value before going to the next. (This is the order in which IPFS exports the blocks under the index, so `ipfs dag export <index cid>` gives the bundle back byte for byte.)
-- No raw block is larger than 1,048,576 bytes. The index block is no larger than 16,777,216 bytes.
+- No block, raw or index, is larger than 1,048,576 bytes, the largest block IPFS nodes pass to each other. (A project whose index would be larger cannot be bundled in format 1.)
 - Every raw block is referred to by the index at least once. Nothing follows the last block.
 
 A **byte string** in the index is one of: a hex string (for values of at most 1,024 bytes), or a JSON array of links, each `{"/": "<cid>"}`, whose blocks concatenated in order are the value. `<cid>` is the CID in its text form: `b` followed by the binary CID in RFC 4648 base32, lowercase, without padding. A link names a raw block in this bundle; one that names no block is class `container`. A builder uses a hex string for values of at most 1,024 bytes and links for longer values, splitting a value into blocks of 1,048,576 bytes with a shorter last block; a verifier accepts either form for any length.
 
 ## 2. Index
 
-The index block is UTF-8 JSON (RFC 8259) with no byte-order mark. A builder writes object keys in ascending order of their UTF-8 bytes, no insignificant whitespace, and integers in shortest decimal form, so that the same evidence always gives the same bundle; a verifier parses any valid JSON and does not check that form. Unknown keys are class `index`. Integers in the index are at most 2^53 - 1; larger values are decimal strings.
+The index block is UTF-8 JSON (RFC 8259) with no byte-order mark. A builder writes object keys in ascending order of their UTF-8 bytes, no insignificant whitespace, and integers in shortest decimal form, so that the same evidence always gives the same bundle; a verifier does not check that form, with these exceptions, each class `index`: an object with the same key twice, at any depth (parsers disagree about which value such a key has); a number written with a fraction or an exponent; an unknown key. A value of the wrong JSON type, length or range for its field is class `index` too, at whichever stage meets it. Integers in the index are at most 2^53 - 1; larger values are decimal strings without leading zeros, as `token` is.
 
 ```
 {
@@ -77,7 +77,7 @@ The root is never all zeros: a project that published nothing has no bundle.
 
 Recursive length prefix as in the Ethereum Yellow Paper, appendix B. Decoding is strict, and anything else is class `proof`: a single byte below 0x80 is not wrapped as a one-byte string; lengths have no leading zero bytes; a long-form length is over 55; the item ends exactly where its length says; no bytes follow the outermost item.
 
-An RLP *integer* is a string of at most 32 bytes with no leading zero byte; zero is the empty string.
+An RLP *integer* is a string of at most 32 bytes with no leading zero byte; zero is the empty string. (An account's nonce and balance are RLP integers of up to 32 bytes; a verifier checks their form and does not need their value.)
 
 ### 3.2 Block headers
 
@@ -88,12 +88,12 @@ A header is given as its RLP bytes. It is a list of at least 15 items, all strin
 An account or storage proof is the array of trie nodes from the root down, as `eth_getProof` returns them (EIP-1186), each an RLP byte string in hex. Verifying `proof` for `key` against `root`:
 
 - The path is the 64 nibbles of `H(key)`, where `key` is the 20-byte address for an account and the 32-byte slot for a storage word.
-- The first node must satisfy `H(node) == root`. Each node is a branch (a list of 17 items) or a short node (a list of 2 items whose first item is a hex-prefix encoded path, Yellow Paper appendix C: flag nibble 0 or 1 for an extension, 2 or 3 for a leaf, an odd flag carrying one nibble of path).
+- The first node must satisfy `H(node) == root`. Each node is a branch (a list of 17 items) or a short node (a list of 2 items whose first item is a hex-prefix encoded path, Yellow Paper appendix C: flag nibble 0 or 1 for an extension, 2 or 3 for a leaf, an odd flag carrying one nibble of path; an even flag has a zero low nibble). An extension's path is at least one nibble.
 - A child reference in a branch or extension is either a 32-byte string, the hash of the next node in the array, or a list (an embedded node of under 32 bytes of RLP), which is the next node itself and takes no array entry. An empty string means no child.
 - The walk ends at a leaf whose remaining path equals the remaining key path: its value is the second item. Or it ends with **absence**, when a branch has no child at the next nibble, a short node's path diverges from the key path, or a branch's 17th item is reached (which never holds a value in these tries). Absence is only valid when the last node in the array is where the walk stopped.
 - Every node in the array is used exactly once; a node left over, a reference that does not match, or a value at a branch is class `proof`. At most 64 nodes.
 
-An **account** is the RLP list `[nonce, balance, storageRoot, codeHash]` (two integers, two 32-byte strings). An account proof that ends in absence means the account does not exist. A **storage word** is an RLP string holding an RLP integer; absence means zero.
+An **account** is the RLP list `[nonce, balance, storageRoot, codeHash]` (two integers, two 32-byte strings). An account proof that ends in absence means the account does not exist. A **storage word** is an RLP string holding an RLP integer of 1 to 32 bytes; absence means zero. A trie never stores zero, so a leaf whose value is the empty string is class `proof`.
 
 ### 3.4 Account evidence
 
@@ -125,10 +125,10 @@ FLAGS_SLOT = VALUE_SLOT + 1  (as a 256-bit integer)
 
 For token 0 and `abxfs.cid` this gives `VALUE_SLOT = 0xcf53182b08e96a80a3594b8136d4fd6393838c5f6f5d0679d5178dcb9e2abb6a`.
 
-The parameter rule, given a state root and the account evidence for the project's `org`, checked in this order (class `param`, except that a missing account or word is class `proof` as section 3.4 says):
+The parameter rule, given a state root and the account evidence for the project's `org`, checked in this order (class `param`; an account the proof shows does not exist fails the first check as `param`, while an account or word the evidence does not cover at all is class `proof` as section 3.4 says):
 
 - The account exists and its code hash is `COLLECTION_CODE_HASH`.
-- `flags = word(org, FLAGS_SLOT)`: no bit above bit 15 is set; bit 8 (is set) is 1; bit 0 (value is a hash) is 0.
+- `flags = word(org, FLAGS_SLOT)` equals `0x0100` exactly: byte 1 (is set) is 1, byte 0 (value is a hash) is 0, and every other bit is zero.
 - `word(org, VALUE_SLOT)` equals the bundle's `root`.
 
 ## 5. Constants of the rollups
@@ -187,7 +187,7 @@ The anchor is `l1.header`. Words below are read from `l1.accounts` at its state 
 5. The factory's record of it: `uuid = H( word(621) ‖ rootClaim ‖ word(96) ‖ word(len(extra)) ‖ extra ‖ zero bytes to a multiple of 32 )`; `rec = word(FACTORY, H(uuid ‖ word(103)))`: its low 20 bytes are `game` and bits 224..255 equal 621.
 6. `word(REGISTRY, H(word(game) ‖ word(5)))` is zero (not blacklisted). Here `word(game)` is the address left-padded with zeros.
 7. `s0 = word(game, 0)`: `createdAt` bits 0..63, `status` bits 128..135, `respected` bits 144..151. `respected` is not zero; `createdAt > retirement`. `s7 = word(game, 7)`: `proofCount` is bits 64..71.
-8. If `final` is true: `game` is the address `word(REGISTRY, 2)` names, and `status` is 2. If `final` is false: `status` is 0 or 2, and `proofCount` is at least 1. (`final: false` is a claim that a proof was accepted for and nobody has won a challenge against, as of the anchor; it may still be overturned.)
+8. If `final` is true: `game` is the address `word(REGISTRY, 2)` names, and `status` is 2. If `final` is false: `status` is 0 or 2, and `proofCount` is at least 1. `proofCount` counts the proofs Base's game contract verified and accepted for the claim (in practice one, from a trusted execution environment, when the game is created): anyone can create a game, but not one with an accepted proof. `final: false` therefore means that such a proof stood behind the claim and no challenge had been won against it as of the anchor. It is weaker than `final`: the claim is inside its challenge period, about five days, and can still be overturned, so a reader who needs more waits for a `final` bundle of the same version.
 9. The L2 block: `h2 = l2.header`, `blockHash = H(h2)`. Its number equals `l2Block`. The message passer's account exists at its state root, and `H( word(0) ‖ stateRoot ‖ passerStorageRoot ‖ blockHash ) == rootClaim`.
 10. The parameter rule holds at the L2 state root, with the org's evidence from `l2.accounts`.
 
@@ -211,7 +211,7 @@ The log is not proved and need not be: whatever is given must hash to the proved
 
 ### 6.4 Which block is the anchor
 
-The anchor block is not checked to be finalized or canonical: no offline check can. The builder takes it from a sync-committee light client's finalized block. The reader decides whether to believe it by looking its hash up elsewhere.
+The anchor block is not checked to be finalized, canonical, or even Ethereum's: no offline check can. The builder takes it from a sync-committee light client's finalized block. The reader must confirm it: find the block of Ethereum mainnet at the printed number, from a source the reader trusts to follow the finalized chain, and compare its hash with the printed hash. That a block with this hash can be found somewhere is not enough: explorers also show blocks that were dropped in a reorganization, and blocks of other chains. For `base` and `arbitrum` bundles the `l2` line can be confirmed the same way against the rollup's own chain, and a matching L2 block is a second, independent check of the same statement.
 
 ### 6.5 `agreed`
 
@@ -219,7 +219,7 @@ The anchor block is not checked to be finalized or canonical: no offline check c
 { "kind": "agreed", "block": <number>, "endpoints": [<host>, ...] }
 ```
 
-No binding is proved: at least two public endpoints, named here, answered the same root for the token parameter at that block of the project's own chain when the bundle was made. A verifier checks only the content and prints `not proved agreed`. A builder makes these only for a version no proof reaches yet, and a later bundle of the same version can carry a proof.
+No binding is proved: at least two public endpoints, named here and all different, answered the same root for the token parameter at that block of the project's own chain when the bundle was made. A verifier checks only the content and prints `not proved agreed`. A builder makes these only for a version no proof reaches yet, and a later bundle of the same version can carry a proof.
 
 ### 6.6 `logged`
 
@@ -253,7 +253,7 @@ The entries are the leaves' records in order. Two entries with the same name byt
 
 **File** `{cid, root, mime, codec, outputHash, content}`: `mime` is 1 to 127 bytes. `cid == H( 0x31 ‖ root ‖ H(mime) ‖ codec ‖ outputHash )`. `codec` is zero exactly when `outputHash` is zero.
 
-- `codec` not zero: the file's bytes are `content`, and `H(content) == outputHash`. `root` is not walked.
+- `codec` not zero: the file's bytes are `content`, and `H(content) == outputHash`. `root` is not walked. (This proves that the project committed to these bytes, through the hash in the file's CID. It does not prove that the encoded chunks on chain decode to them: the store does not check that either, and the builder does when it makes the bundle.)
 - `codec` zero and `root` all zeros: the file is empty.
 - `codec` zero otherwise: walk the chunk-node tree from `root`. A node is `nodes[id]` with `H(0x41 ‖ blob) == id`, level byte 0 to 3, each child one level below its parent. A **branch**: `level ‖ u16(n) ‖ n × ( id:32 ‖ u32 count ‖ u48 bytes )`, `2 ≤ n ≤ 128`, length exactly `3 + 42·n`. A **leaf**: `0x00 ‖ m × ( chunkId:32 ‖ u48 size )`, `m ≥ 1`, length exactly `1 + 38·m`. The file's bytes are its chunks' `data` in order. Each chunk `chunks[chunkId]` satisfies `chunkId == H( 0x30 ‖ backend ‖ inputHash ‖ H(data) ‖ u48(len(data)) )`, `len(data) ≥ 1`, and `len(data)` equals the leaf's `size`.
 
@@ -322,11 +322,11 @@ Lines end with a single line feed. Each directory line is `d <path>/`; each file
 
 A verifier that rejects writes one line, `reject <class> <message>`, and exits with status 1. The classes are `container`, `index`, `proof`, `binding`, `param` and `content`, checked in this order: container, index, the binding proof (proof, binding, param), then content. Messages are free text. Any other failure (unreadable file, out of memory) exits with status 2.
 
-When a verifier is also given an output directory, it writes each file under it at its path, with the names percent-decoded (a root that is a file is written as `DIR/file`), and refuses a bundle with a name that is empty, `.`, `..`, or holds `/` or a zero byte.
+When a verifier is also given an output directory, it writes each file under it at its path, with the names percent-decoded (a root that is a file is written as `DIR/file`). `DIR` must not exist or must be empty, and no file is written over another, and refuses a bundle with a name that is empty, `.`, `..`, or holds `/` or a zero byte.
 
 ## 12. Limits
 
-A verifier may refuse, as class `content`, a bundle whose content is more than 1 GiB in total, nests directories more than 64 deep, or has more than 65,536 entries. Bundles within these limits are accepted.
+A verifier may refuse, as class `content`, a bundle whose content is more than 1 GiB in total, nests directories more than 64 deep, has more than 65,536 entries, or needs more than 1,048,576 node reads (a tree may name one node many times; each read counts). Entries, bytes and reads are counted each time the walk meets them, so a file or directory under two names counts twice. Bundles within these limits are accepted.
 
 ## 13. Manifest
 

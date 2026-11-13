@@ -7,8 +7,8 @@ use crate::Result;
 
 /// Largest raw block, the largest a block can be and still travel between IPFS nodes.
 pub const MAX_BLOCK: usize = 1_048_576;
-/// Largest index block.
-pub const MAX_INDEX: usize = 16_777_216;
+/// Largest index block: the same, so that any IPFS node can pass it on.
+pub const MAX_INDEX: usize = 1_048_576;
 
 const DAG_JSON_PREFIX: [u8; 5] = [0x01, 0xa9, 0x02, 0x12, 0x20];
 const RAW_PREFIX: [u8; 4] = [0x01, 0x55, 0x12, 0x20];
@@ -175,7 +175,7 @@ pub fn read(b: &[u8]) -> std::result::Result<Parsed<'_>, String> {
         }
         if first {
             if data.len() > MAX_INDEX {
-                return Err("the index block is larger than 16 MiB".into());
+                return Err("the index block is larger than 1 MiB".into());
             }
             index = data;
             first = false;

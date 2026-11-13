@@ -12,7 +12,7 @@
 //
 // usage: node tools/archive/daily.mjs <dir> [--only <chain>-<org>-<token>]
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { KEYS, finalized, prove } from './proof.mjs';
 import { CHAINS } from '../../site/chain.js';
@@ -45,29 +45,34 @@ async function currentRoots(c) {
   }
   if (heights.length < 2) throw new Error(`fewer than two endpoints answer for chain ${c.chainId}`);
   const block = Math.min(...heights.map((h) => h[1])) - 3;
-  const n = Math.min(Math.max((c.sale?.minted ?? 0) + 2, 3), MAX_TOKENS);
+  const minted = Number.isFinite(Number(c.sale?.minted)) ? Number(c.sale.minted) : 0;
+  const n = Math.min(Math.max(minted + 2, 3), MAX_TOKENS);
   const out = [];
+  // Tokens past the cap are found only through the collection's logs: say so, so that it is not silent.
+  out.capped = minted + 2 > MAX_TOKENS;
   for (const [key, k] of Object.entries(KEYS)) {
     for (let s = 0; s < n; s += 20) {
       const toks = Array.from({ length: Math.min(20, n - s) }, (_, i) => s + i);
       const calls = toks.map((t, i) => ({ jsonrpc: '2.0', id: i, method: 'eth_call', params: [{ to: c.address, data: '0x6bd39222' + word(t) + k }, '0x' + block.toString(16)] }));
-      let answers = [];
-      for (let attempt = 0; attempt < 4 && answers.length < 2; attempt++) {
-        if (attempt) await sleep(3000 * attempt);
-        answers = (await Promise.allSettled(heights.map(([u]) => post(u, calls, 30_000)))).filter((x) => x.status === 'fulfilled' && Array.isArray(x.value) && x.value.every((r) => r.result !== undefined || r.error)).map((x) => x.value);
-      }
-      // An endpoint that refuses whole batches is asked item by item below.
       const value = (r) => (r?.result && r.result.length >= 66 ? r.result.slice(0, 66).toLowerCase() : r?.error && /revert/i.test(r.error.message || '') ? '0x' + '0'.repeat(64) : null);
+      // Each endpoint's reply to the batch, by host; null for an endpoint that refused or broke the batch.
+      const replies = await Promise.all(heights.map(async ([u]) => {
+        const r = await post(u, calls, 30_000).catch(() => null);
+        return [new URL(u).host, Array.isArray(r) ? r : null];
+      }));
       for (const [i, t] of toks.entries()) {
-        let got = answers.map((a) => value(a.find((r) => r.id === i))).filter(Boolean);
-        // An endpoint may refuse some items of a batch (a rate limit): ask for those one at a time.
-        for (let attempt = 0; attempt < 3 && got.length < 2; attempt++) {
+        // [host, root] from every endpoint whose batch reply answers this token.
+        let each = replies.filter(([, r]) => r).map(([host, r]) => [host, value(r.find((x) => x.id === i))]).filter((e) => e[1]);
+        // An endpoint may refuse a whole batch or some of its items (a rate limit): those are asked one at a time.
+        for (let attempt = 0; attempt < 3 && each.length < 2; attempt++) {
           await sleep(1500 * (attempt + 1));
-          got = (await Promise.allSettled(heights.map(([u]) => post(u, { ...calls[i], id: 1 })))).filter((x) => x.status === 'fulfilled').map((x) => value(x.value)).filter(Boolean);
+          each = (await Promise.all(heights.map(async ([u]) => [new URL(u).host, value(await post(u, { ...calls[i], id: 1 }).catch(() => null))]))).filter((e) => e[1]);
         }
+        // The endpoints an `agreed` proof names are the ones that gave this answer.
+        const got = each.map((e) => e[1]), hosts = each.map((e) => e[0]);
         if (got.length < 2) throw new Error(`fewer than two endpoints answered for ${c.address} token ${t}`);
         if (new Set(got).size > 1) throw new Error(`the endpoints disagree about ${c.address} token ${t} ${key}`);
-        if (!/^0x0+$/.test(got[0])) out.push({ token: String(t), key, root: got[0], block, endpoints: heights.map(([u]) => new URL(u).host) });
+        if (!/^0x0+$/.test(got[0])) out.push({ token: String(t), key, root: got[0], block, endpoints: hosts });
       }
     }
   }
@@ -93,7 +98,9 @@ async function loggedRoots(chainId, addresses, head) {
   if (chainId === 1) {
     for (const a of Object.keys(addresses)) {
       let params = '';
-      for (let page = 0; page < 50; page++) {
+      let done = false;
+      for (let page = 0; !done; page++) {
+        if (page >= 400) throw new Error(`Blockscout has more than 400 pages of logs for ${a}`);
         let r;
         for (let attempt = 0; attempt < 4; attempt++) {
           r = await fetch(`${BLOCKSCOUT_V2}/addresses/${a}/logs${params}`, { signal: AbortSignal.timeout(30_000) }).catch(() => null);
@@ -107,7 +114,10 @@ async function loggedRoots(chainId, addresses, head) {
           const d = decodeLog({ ...l, address: a });
           if (d) out.push(d);
         }
-        if (!j.next_page_params) break;
+        if (!Array.isArray(j.items)) throw new Error(`Blockscout gave no list of logs for ${a}`);
+        // Logs come newest first: a page that ends before the first block wanted is the last one needed.
+        const oldest = j.items.length ? Number(j.items[j.items.length - 1].block_number) : 0;
+        if (!j.next_page_params || oldest < addresses[a]) { done = true; break; }
         params = '?' + new URLSearchParams(j.next_page_params);
         await sleep(400);
       }
@@ -175,21 +185,34 @@ const KIND_NAME = { ethereum: 'ethereum', final: 'base final', claimed: 'base cl
 
 async function main() {
   mkdirSync(join(DIR, 'bundles'), { recursive: true });
+  // One run at a time: two would share the temporary files and the state.
+  const lock = join(DIR, 'lock');
+  try { mkdirSync(lock); } catch {
+    if (Date.now() - statSync(lock).mtimeMs < 6 * 3600_000) { console.log(JSON.stringify({ made: [], versions: 0, failed: ['another run holds the lock'] })); return; }
+  }
+  try { await run(); } finally { rmSync(lock, { recursive: true, force: true }); }
+}
+
+async function run() {
   const state = load();
   const failed = [], made = [];
-  const contracts = (await fetch(CONTRACTS).then((r) => r.json())).contracts.filter((c) => RPCS[c.chainId])
+  const contracts = (await fetch(CONTRACTS).then((r) => r.json())).contracts.filter((c) => RPCS[c.chainId] && /^0x[0-9a-fA-F]{40}$/.test(c.address) && Number.isSafeInteger(c.block))
     .filter((c) => !ONLY || ONLY.startsWith(`${c.chainId}-${c.address.slice(2).toLowerCase()}-`));
   const note = (chain, org, token, key, root, seen) => {
     const k = vkey(chain, org, token, key, root);
     state.versions[k] ||= { project: { chain, org, token, key }, root, seen, bundles: [] };
-    if (seen.block < state.versions[k].seen.block) state.versions[k].seen = seen;
+    const cur = state.versions[k].seen;
+    // The earliest block known, and the first day the archive saw the version current (a log has no such day).
+    state.versions[k].seen = { block: Math.min(cur.block, seen.block), date: cur.date ?? seen.date };
     return state.versions[k];
   };
   // Versions now current.
   const current = new Map();
   for (const c of contracts) {
     try {
-      for (const r of await currentRoots(c)) {
+      const roots = await currentRoots(c);
+      if (roots.capped) failed.push(`${c.chainId} ${c.address}: only its first ${MAX_TOKENS} tokens are read for current roots; later ones are found from its logs`);
+      for (const r of roots) {
         const v = note(c.chainId, c.address.toLowerCase(), r.token, r.key, r.root, { block: r.block, date: today() });
         current.set(`${c.chainId}-${c.address.toLowerCase()}-${r.token}-${r.key}`, { v, agreed: { kind: 'agreed', block: r.block, endpoints: r.endpoints } });
       }

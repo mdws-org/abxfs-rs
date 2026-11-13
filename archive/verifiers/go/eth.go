@@ -192,6 +192,9 @@ func rlpIntToWord(it rlpItem) ([32]byte, error) {
 	if err := validateRLPInteger(it); err != nil {
 		return out, err
 	}
+	if len(it.str) == 0 {
+		return out, rejectf("proof", "storage word must be 1 to 32 bytes")
+	}
 	copy(out[32-len(it.str):], it.str)
 	return out, nil
 }
@@ -332,8 +335,8 @@ func verifyMPTProof(root [32]byte, keyBytes []byte, proof [][]byte) ([]byte, boo
 				return nil, false, err
 			}
 			if isLeaf {
-				if curNode.elems[1].isList {
-					return nil, false, rejectf("proof", "leaf value must be RLP string")
+				if curNode.elems[1].isList || len(curNode.elems[1].str) == 0 {
+					return nil, false, rejectf("proof", "leaf value must be non-empty RLP string")
 				}
 				if proofIdx != len(proof) {
 					return nil, false, rejectf("proof", "leftover nodes in proof")
@@ -613,16 +616,8 @@ func verifyParamRule(st *verifiedState, proj projectInfo, expectedRoot [32]byte)
 		return err
 	}
 
-	for i := 0; i < 30; i++ {
-		if flags[i] != 0 {
-			return rejectf("param", "parameter flags has bit above 15 set")
-		}
-	}
-	if (flags[30] & 0x01) != 1 {
-		return rejectf("param", "parameter bit 8 (is set) is not 1")
-	}
-	if (flags[31] & 0x01) != 0 {
-		return rejectf("param", "parameter bit 0 (value is a hash) is not 0")
+	if flags != wordUint64(0x0100) {
+		return rejectf("param", "parameter flags is not 0x0100")
 	}
 	if val != expectedRoot {
 		return rejectf("param", "parameter value does not match bundle root")

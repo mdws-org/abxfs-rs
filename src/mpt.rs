@@ -111,6 +111,11 @@ pub fn encode(r: &Rlp) -> Vec<u8> {
     out
 }
 
+/// Whether `b` is an RLP integer of at most `max` bytes: no leading zero byte.
+pub fn is_int(b: &[u8], max: usize) -> bool {
+    b.len() <= max && b.first() != Some(&0)
+}
+
 /// An RLP integer: at most `max` bytes with no leading zero, as a u128 when it fits.
 pub fn int(b: &[u8], max: usize) -> Option<u128> {
     if b.len() > max || b.first() == Some(&0) || b.len() > 16 {
@@ -201,7 +206,10 @@ pub fn verify(root: &H256, key: &[u8], proof: &[Vec<u8>]) -> Result<Option<Vec<u
                     let v = l[1].str().ok_or("a leaf's value is not a string")?.to_vec();
                     return finish(used, proof.len(), Some(v));
                 }
-                if nib.is_empty() || !rest.starts_with(&nib) {
+                if nib.is_empty() {
+                    return Err("an extension has an empty path".into());
+                }
+                if !rest.starts_with(&nib) {
                     return finish(used, proof.len(), None);
                 }
                 at += nib.len();
@@ -242,8 +250,10 @@ pub fn account(state_root: &H256, address: &[u8; 20], proof: &[Vec<u8>]) -> Resu
     let Some(v) = verify(state_root, address, proof)? else { return Ok(None) };
     let r = decode(&v).ok_or("an account is not valid RLP")?;
     let l = r.list().filter(|l| l.len() == 4).ok_or("an account is not a list of four")?;
-    for i in 0..2 {
-        int(l[i].str().ok_or("an account's nonce or balance is not a string")?, 32).ok_or("an account's nonce or balance is not an integer")?;
+    for item in &l[..2] {
+        if !is_int(item.str().ok_or("an account's nonce or balance is not a string")?, 32) {
+            return Err("an account's nonce or balance is not an integer".into());
+        }
     }
     let sr: H256 = l[2].str().and_then(|s| s.try_into().ok()).ok_or("an account's storage root is not 32 bytes")?;
     let ch: H256 = l[3].str().and_then(|s| s.try_into().ok()).ok_or("an account's code hash is not 32 bytes")?;

@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,9 +18,16 @@ const (
 	maxContentBytes = uint64(1) << 30
 	maxDirDepth     = 64
 	maxEntries      = 65536
+	maxNodeReads    = 1_048_576
 )
 
 var bamfsBackend = mustHex20("0x91520cdaaab44267e99d08fea7730d7a7c60e9c2")
+
+type walkBudget struct {
+	entries   uint64
+	bytes     uint64
+	nodeReads uint64
+}
 
 type dirEntry struct {
 	cleanName []byte
@@ -27,10 +35,16 @@ type dirEntry struct {
 	isDir     bool
 }
 
+type cachedDir struct {
+	entries   []dirEntry
+	nodeReads uint64
+}
+
 type validatedFile struct {
-	size   uint64
-	sha256 [32]byte
-	parts  [][]byte
+	size      uint64
+	sha256    [32]byte
+	parts     [][]byte
+	nodeReads uint64
 }
 
 type outputItem struct {
@@ -62,6 +76,37 @@ func verifyContent(idx *bundleIndex, hasOut bool) (contentListing, error) {
 	}
 }
 
+func readTreeNode(
+	id [32]byte,
+	prefix byte,
+	nodes map[[32]byte]byteStr,
+	usedNodes map[[32]byte]bool,
+	verified map[[32]byte][]byte,
+	budget *walkBudget,
+) ([]byte, error) {
+	if budget.nodeReads >= maxNodeReads {
+		return nil, rejectf("content", "bundle exceeds 1,048,576 node reads")
+	}
+	budget.nodeReads++
+	if blob, ok := verified[id]; ok {
+		return blob, nil
+	}
+	ns, ok := nodes[id]
+	if !ok {
+		return nil, rejectf("content", "missing tree node")
+	}
+	usedNodes[id] = true
+	blob, ok := ns.bytes()
+	if !ok || len(blob) < 1 {
+		return nil, rejectf("content", "invalid tree node")
+	}
+	if keccak256([]byte{prefix}, blob) != id {
+		return nil, rejectf("content", "tree node hash mismatch")
+	}
+	verified[id] = blob
+	return blob, nil
+}
+
 func verifyABXFS(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing, error) {
 	dirByCID := make(map[[32]byte]int, len(c.abxDirs))
 	for i, d := range c.abxDirs {
@@ -81,15 +126,22 @@ func verifyABXFS(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing,
 		fileByCID[f.cid] = i
 	}
 
+	var budget walkBudget
 	usedNodes := make(map[[32]byte]bool, len(c.abxNodes))
+	verifiedEntryNodes := make(map[[32]byte][]byte)
+	verifiedChunkNodes := make(map[[32]byte][]byte)
 	usedChunks := make(map[[32]byte]bool, len(c.abxChunks))
 	verifiedChunks := make(map[[32]byte]bool, len(c.abxChunks))
-	validatedDirs := make(map[[32]byte][]dirEntry, len(c.abxDirs))
+	validatedDirs := make(map[[32]byte]cachedDir, len(c.abxDirs))
 	validatedFiles := make(map[[32]byte]*validatedFile, len(c.abxFiles))
 
 	validateDir := func(cid [32]byte) ([]dirEntry, error) {
 		if cached, ok := validatedDirs[cid]; ok {
-			return cached, nil
+			if cached.nodeReads > maxNodeReads-budget.nodeReads {
+				return nil, rejectf("content", "bundle exceeds 1,048,576 node reads")
+			}
+			budget.nodeReads += cached.nodeReads
+			return cached.entries, nil
 		}
 		dIdx, ok := dirByCID[cid]
 		if !ok {
@@ -99,10 +151,11 @@ func verifyABXFS(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing,
 		if keccak256([]byte{0x32}, d.root[:]) != d.cid {
 			return nil, rejectf("content", "abxfs directory CID mismatch")
 		}
+		startReads := budget.nodeReads
 		var entries []dirEntry
 		if d.root != ([32]byte{}) {
 			var err error
-			entries, err = walkEntryTree(d.root, 0x42, false, c.abxNodes, usedNodes)
+			entries, err = walkEntryTree(d.root, 0x42, false, c.abxNodes, usedNodes, verifiedEntryNodes, &budget)
 			if err != nil {
 				return nil, err
 			}
@@ -110,12 +163,19 @@ func verifyABXFS(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing,
 		if err := checkDirEntries(entries, dirByCID, fileByCID); err != nil {
 			return nil, err
 		}
-		validatedDirs[cid] = entries
+		validatedDirs[cid] = cachedDir{
+			entries:   entries,
+			nodeReads: budget.nodeReads - startReads,
+		}
 		return entries, nil
 	}
 
 	validateFile := func(cid [32]byte) (*validatedFile, error) {
 		if cached, ok := validatedFiles[cid]; ok {
+			if cached.nodeReads > maxNodeReads-budget.nodeReads {
+				return nil, rejectf("content", "bundle exceeds 1,048,576 node reads")
+			}
+			budget.nodeReads += cached.nodeReads
 			return cached, nil
 		}
 		fIdx, ok := fileByCID[cid]
@@ -148,10 +208,14 @@ func verifyABXFS(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing,
 			if keccak256(f.content.segs...) != f.outputHash {
 				return nil, rejectf("content", "abxfs compressed content hash mismatch")
 			}
+			var parts [][]byte
+			if hasOut {
+				parts = f.content.segs
+			}
 			vf = &validatedFile{
 				size:   f.content.totalLen,
 				sha256: sha256Segs(f.content.segs),
-				parts:  f.content.segs,
+				parts:  parts,
 			}
 		} else if f.root == ([32]byte{}) {
 			vf = &validatedFile{
@@ -159,23 +223,17 @@ func verifyABXFS(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing,
 				sha256: sha256.Sum256(nil),
 			}
 		} else {
+			startReads := budget.nodeReads
+			remBytes := maxContentBytes - budget.bytes
 			var parts [][]byte
 			var fileSize uint64
 			h := sha256.New()
 
 			var walkChunks func(id [32]byte, expectedLevel int, isFirst bool) error
 			walkChunks = func(id [32]byte, expectedLevel int, isFirst bool) error {
-				ns, ok := c.abxNodes[id]
-				if !ok {
-					return rejectf("content", "missing abxfs chunk node")
-				}
-				usedNodes[id] = true
-				blob, ok := ns.bytes()
-				if !ok || len(blob) < 1 {
-					return rejectf("content", "invalid abxfs chunk node")
-				}
-				if keccak256([]byte{0x41}, blob) != id {
-					return rejectf("content", "abxfs chunk node hash mismatch")
+				blob, err := readTreeNode(id, 0x41, c.abxNodes, usedNodes, verifiedChunkNodes, &budget)
+				if err != nil {
+					return err
 				}
 				level := int(blob[0])
 				if isFirst {
@@ -229,13 +287,15 @@ func verifyABXFS(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing,
 					if ch.data.totalLen != leafSize {
 						return rejectf("content", "abxfs chunk length does not match leaf size")
 					}
-					if leafSize > maxContentBytes-fileSize {
-						return rejectf("content", "file exceeds 1 GiB limit")
+					if leafSize > remBytes-fileSize {
+						return rejectf("content", "total content exceeds 1 GiB")
 					}
 					fileSize += leafSize
 					for _, seg := range ch.data.segs {
 						h.Write(seg)
-						parts = append(parts, seg)
+						if hasOut {
+							parts = append(parts, seg)
+						}
 					}
 				}
 				return nil
@@ -246,14 +306,19 @@ func verifyABXFS(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing,
 			}
 			var sum [32]byte
 			copy(sum[:], h.Sum(nil))
-			vf = &validatedFile{size: fileSize, sha256: sum, parts: parts}
+			vf = &validatedFile{
+				size:      fileSize,
+				sha256:    sum,
+				parts:     parts,
+				nodeReads: budget.nodeReads - startReads,
+			}
 		}
 
 		validatedFiles[cid] = vf
 		return vf, nil
 	}
 
-	listing, err := buildListing(rootCID, dirByCID, fileByCID, validateDir, validateFile, hasOut)
+	listing, err := buildListing(rootCID, dirByCID, fileByCID, validateDir, validateFile, &budget, hasOut)
 	if err != nil {
 		return contentListing{}, err
 	}
@@ -285,15 +350,22 @@ func verifyBAMFS2(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing
 		fileByCID[f.cid] = i
 	}
 
+	var budget walkBudget
 	usedNodes := make(map[[32]byte]bool, len(c.bam2Nodes))
+	verifiedEntryNodes := make(map[[32]byte][]byte)
+	verifiedChunkNodes := make(map[[32]byte][]byte)
 	usedChunks := make(map[[32]byte]bool, len(c.bam2Chunks))
 	verifiedChunks := make(map[[32]byte]bool, len(c.bam2Chunks))
-	validatedDirs := make(map[[32]byte][]dirEntry, len(c.bam2Dirs))
+	validatedDirs := make(map[[32]byte]cachedDir, len(c.bam2Dirs))
 	validatedFiles := make(map[[32]byte]*validatedFile, len(c.bam2Files))
 
 	validateDir := func(cid [32]byte) ([]dirEntry, error) {
 		if cached, ok := validatedDirs[cid]; ok {
-			return cached, nil
+			if cached.nodeReads > maxNodeReads-budget.nodeReads {
+				return nil, rejectf("content", "bundle exceeds 1,048,576 node reads")
+			}
+			budget.nodeReads += cached.nodeReads
+			return cached.entries, nil
 		}
 		dIdx, ok := dirByCID[cid]
 		if !ok {
@@ -303,19 +375,27 @@ func verifyBAMFS2(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing
 		if keccak256([]byte{0x12}, d.root[:]) != d.cid {
 			return nil, rejectf("content", "bamfs2 directory CID mismatch")
 		}
-		entries, err := walkEntryTree(d.root, 0x22, true, c.bam2Nodes, usedNodes)
+		startReads := budget.nodeReads
+		entries, err := walkEntryTree(d.root, 0x22, true, c.bam2Nodes, usedNodes, verifiedEntryNodes, &budget)
 		if err != nil {
 			return nil, err
 		}
 		if err := checkDirEntries(entries, dirByCID, fileByCID); err != nil {
 			return nil, err
 		}
-		validatedDirs[cid] = entries
+		validatedDirs[cid] = cachedDir{
+			entries:   entries,
+			nodeReads: budget.nodeReads - startReads,
+		}
 		return entries, nil
 	}
 
 	validateFile := func(cid [32]byte) (*validatedFile, error) {
 		if cached, ok := validatedFiles[cid]; ok {
+			if cached.nodeReads > maxNodeReads-budget.nodeReads {
+				return nil, rejectf("content", "bundle exceeds 1,048,576 node reads")
+			}
+			budget.nodeReads += cached.nodeReads
 			return cached, nil
 		}
 		fIdx, ok := fileByCID[cid]
@@ -347,32 +427,30 @@ func verifyBAMFS2(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing
 			if keccak256(f.content.segs...) != f.outputHash {
 				return nil, rejectf("content", "bamfs2 compressed content hash mismatch")
 			}
+			var parts [][]byte
+			if hasOut {
+				parts = f.content.segs
+			}
 			vf = &validatedFile{
 				size:   f.content.totalLen,
 				sha256: sha256Segs(f.content.segs),
-				parts:  f.content.segs,
+				parts:  parts,
 			}
 		} else {
 			if f.outputHash != ([32]byte{}) {
 				return nil, rejectf("content", "bamfs2 uncompressed outputHash must be zero")
 			}
+			startReads := budget.nodeReads
+			remBytes := maxContentBytes - budget.bytes
 			var parts [][]byte
 			var fileSize uint64
 			h := sha256.New()
 
 			var walkChunks func(id [32]byte, expectedLevel int, isFirst bool) error
 			walkChunks = func(id [32]byte, expectedLevel int, isFirst bool) error {
-				ns, ok := c.bam2Nodes[id]
-				if !ok {
-					return rejectf("content", "missing bamfs2 chunk node")
-				}
-				usedNodes[id] = true
-				blob, ok := ns.bytes()
-				if !ok || len(blob) < 1 {
-					return rejectf("content", "invalid bamfs2 chunk node")
-				}
-				if keccak256([]byte{0x21}, blob) != id {
-					return rejectf("content", "bamfs2 chunk node hash mismatch")
+				blob, err := readTreeNode(id, 0x21, c.bam2Nodes, usedNodes, verifiedChunkNodes, &budget)
+				if err != nil {
+					return err
 				}
 				level := int(blob[0])
 				if isFirst {
@@ -424,13 +502,15 @@ func verifyBAMFS2(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing
 					if ch.totalLen != leafSize {
 						return rejectf("content", "bamfs2 chunk length mismatch")
 					}
-					if leafSize > maxContentBytes-fileSize {
-						return rejectf("content", "file exceeds 1 GiB limit")
+					if leafSize > remBytes-fileSize {
+						return rejectf("content", "total content exceeds 1 GiB")
 					}
 					fileSize += leafSize
 					for _, seg := range ch.segs {
 						h.Write(seg)
-						parts = append(parts, seg)
+						if hasOut {
+							parts = append(parts, seg)
+						}
 					}
 				}
 				return nil
@@ -444,14 +524,19 @@ func verifyBAMFS2(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing
 			}
 			var sum [32]byte
 			copy(sum[:], h.Sum(nil))
-			vf = &validatedFile{size: fileSize, sha256: sum, parts: parts}
+			vf = &validatedFile{
+				size:      fileSize,
+				sha256:    sum,
+				parts:     parts,
+				nodeReads: budget.nodeReads - startReads,
+			}
 		}
 
 		validatedFiles[cid] = vf
 		return vf, nil
 	}
 
-	listing, err := buildListing(rootCID, dirByCID, fileByCID, validateDir, validateFile, hasOut)
+	listing, err := buildListing(rootCID, dirByCID, fileByCID, validateDir, validateFile, &budget, hasOut)
 	if err != nil {
 		return contentListing{}, err
 	}
@@ -483,6 +568,7 @@ func verifyBAMFS1(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing
 		fileByCID[f.cid] = i
 	}
 
+	var budget walkBudget
 	usedChunks := make(map[[32]byte]bool, len(c.bam1Chunks))
 	verifiedChunks := make(map[[32]byte]bool, len(c.bam1Chunks))
 	validatedDirs := make(map[[32]byte][]dirEntry, len(c.bam1Dirs))
@@ -566,15 +652,20 @@ func verifyBAMFS1(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing
 			if keccak256(f.content.segs...) != f.outputHash {
 				return nil, rejectf("content", "bamfs1 compressed content hash mismatch")
 			}
+			var parts [][]byte
+			if hasOut {
+				parts = f.content.segs
+			}
 			vf = &validatedFile{
 				size:   f.content.totalLen,
 				sha256: sha256Segs(f.content.segs),
-				parts:  f.content.segs,
+				parts:  parts,
 			}
 		} else {
 			if f.outputHash != ([32]byte{}) {
 				return nil, rejectf("content", "bamfs1 uncompressed outputHash must be zero")
 			}
+			remBytes := maxContentBytes - budget.bytes
 			var parts [][]byte
 			var fileSize uint64
 			h := sha256.New()
@@ -593,13 +684,15 @@ func verifyBAMFS1(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing
 					}
 					verifiedChunks[chunkID] = true
 				}
-				if ch.totalLen > maxContentBytes-fileSize {
-					return nil, rejectf("content", "file exceeds 1 GiB limit")
+				if ch.totalLen > remBytes-fileSize {
+					return nil, rejectf("content", "total content exceeds 1 GiB")
 				}
 				fileSize += ch.totalLen
 				for _, seg := range ch.segs {
 					h.Write(seg)
-					parts = append(parts, seg)
+					if hasOut {
+						parts = append(parts, seg)
+					}
 				}
 			}
 			var sum [32]byte
@@ -611,7 +704,7 @@ func verifyBAMFS1(rootCID [32]byte, c *contentInfo, hasOut bool) (contentListing
 		return vf, nil
 	}
 
-	listing, err := buildListing(rootCID, dirByCID, fileByCID, validateDir, validateFile, hasOut)
+	listing, err := buildListing(rootCID, dirByCID, fileByCID, validateDir, validateFile, &budget, hasOut)
 	if err != nil {
 		return contentListing{}, err
 	}
@@ -629,21 +722,15 @@ func walkEntryTree(
 	isBAMFS bool,
 	nodes map[[32]byte]byteStr,
 	usedNodes map[[32]byte]bool,
+	verifiedNodes map[[32]byte][]byte,
+	budget *walkBudget,
 ) ([]dirEntry, error) {
 	var entries []dirEntry
 	var walk func(id [32]byte, expectedLevel int, isFirst bool) error
 	walk = func(id [32]byte, expectedLevel int, isFirst bool) error {
-		ns, ok := nodes[id]
-		if !ok {
-			return rejectf("content", "missing directory entry node")
-		}
-		usedNodes[id] = true
-		blob, ok := ns.bytes()
-		if !ok || len(blob) < 1 {
-			return rejectf("content", "invalid directory entry node")
-		}
-		if keccak256([]byte{prefix}, blob) != id {
-			return rejectf("content", "directory entry node hash mismatch")
+		blob, err := readTreeNode(id, prefix, nodes, usedNodes, verifiedNodes, budget)
+		if err != nil {
+			return err
 		}
 		level := int(blob[0])
 		if isFirst {
@@ -709,6 +796,9 @@ func walkEntryTree(
 				}
 				cleanName = dropUTF8BOM(rawName)
 			}
+			if uint64(len(entries)) >= maxEntries {
+				return rejectf("content", "bundle exceeds 65,536 entries")
+			}
 			entries = append(entries, dirEntry{
 				cleanName: cleanName,
 				cid:       entryCID,
@@ -753,13 +843,12 @@ func buildListing(
 	dirByCID, fileByCID map[[32]byte]int,
 	validateDir func([32]byte) ([]dirEntry, error),
 	validateFile func([32]byte) (*validatedFile, error),
+	budget *walkBudget,
 	hasOut bool,
 ) (contentListing, error) {
 	if _, isDir := dirByCID[rootCID]; isDir {
 		var items []outputItem
-		var totalEntries uint64
 		var fileCount uint64
-		var totalBytes uint64
 		activeDirs := make(map[[32]byte]bool)
 
 		var walkDir func(cid [32]byte, encPrefix string, rawSegs []string, depth int) error
@@ -775,10 +864,10 @@ func buildListing(
 				return err
 			}
 			for _, ent := range entries {
-				totalEntries++
-				if totalEntries > maxEntries {
+				if budget.entries >= maxEntries {
 					return rejectf("content", "bundle exceeds 65,536 entries")
 				}
+				budget.entries++
 				if hasOut && !isSafeOutName(ent.cleanName) {
 					return rejectf("content", "unsafe entry name for output directory")
 				}
@@ -811,10 +900,10 @@ func buildListing(
 					if err != nil {
 						return err
 					}
-					if vf.size > maxContentBytes-totalBytes {
+					if vf.size > maxContentBytes-budget.bytes {
 						return rejectf("content", "total content exceeds 1 GiB")
 					}
-					totalBytes += vf.size
+					budget.bytes += vf.size
 					fileCount++
 					items = append(items, outputItem{
 						isDir:   false,
@@ -841,7 +930,7 @@ func buildListing(
 		return contentListing{
 			items:      items,
 			fileCount:  fileCount,
-			totalBytes: totalBytes,
+			totalBytes: budget.bytes,
 		}, nil
 	}
 
@@ -853,6 +942,10 @@ func buildListing(
 		if err != nil {
 			return contentListing{}, err
 		}
+		if vf.size > maxContentBytes-budget.bytes {
+			return contentListing{}, rejectf("content", "total content exceeds 1 GiB")
+		}
+		budget.bytes += vf.size
 		return contentListing{
 			items: []outputItem{{
 				isDir:   false,
@@ -936,7 +1029,34 @@ func putU48(v uint64) [6]byte {
 	}
 }
 
+func checkOutDir(outDir string) error {
+	fi, err := os.Stat(outDir)
+	if err == nil {
+		if !fi.IsDir() {
+			return fmt.Errorf("--out path %s exists and is not a directory", outDir)
+		}
+		entries, err := os.ReadDir(outDir)
+		if err != nil {
+			return err
+		}
+		if len(entries) > 0 {
+			return fmt.Errorf("--out directory %s is not empty", outDir)
+		}
+		return nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		if _, lerr := os.Lstat(outDir); lerr == nil {
+			return fmt.Errorf("--out path %s exists and is not a directory", outDir)
+		}
+		return nil
+	}
+	return err
+}
+
 func writeOutputFiles(outDir string, items []outputItem) error {
+	if err := checkOutDir(outDir); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
@@ -959,7 +1079,7 @@ func writeOutputFiles(outDir string, items []outputItem) error {
 }
 
 func writePartsToFile(dst string, parts [][]byte) error {
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}

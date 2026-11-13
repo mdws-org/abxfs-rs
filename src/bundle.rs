@@ -255,8 +255,22 @@ fn link_order(v: &Value, out: &mut Vec<Vec<u8>>) {
                 out.push(c);
             }
         }
-        Value::Object(o) => o.values().for_each(|x| link_order(x, out)),
+        Value::Object(o) => {
+            let mut kv: Vec<(&String, &Value)> = o.iter().collect();
+            kv.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+            kv.into_iter().for_each(|x| link_order(x.1, out));
+        }
         Value::Array(a) => a.iter().for_each(|x| link_order(x, out)),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The index is written with keys in ascending order and no whitespace: the bundle's bytes depend on it.
+    #[test]
+    fn index_form() {
+        let v = serde_json::json!({ "b": 1, "a": { "z": [1, 2], "c": "x" } });
+        assert_eq!(serde_json::to_string(&v).unwrap(), r#"{"a":{"c":"x","z":[1,2]},"b":1}"#);
     }
 }

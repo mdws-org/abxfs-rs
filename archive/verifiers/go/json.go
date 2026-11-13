@@ -32,9 +32,8 @@ type jsonValue struct {
 }
 
 type jsonParser struct {
-	data      []byte
-	pos       int
-	hasDupKey bool
+	data []byte
+	pos  int
 }
 
 const (
@@ -42,24 +41,24 @@ const (
 	maxSafeInt   = (uint64(1) << 53) - 1
 )
 
-func parseJSON(data []byte) (jsonValue, bool, error) {
+func parseJSON(data []byte) (jsonValue, error) {
 	if bytes.HasPrefix(data, []byte{0xef, 0xbb, 0xbf}) {
-		return jsonValue{}, false, rejectf("index", "UTF-8 byte-order mark not allowed")
+		return jsonValue{}, rejectf("index", "UTF-8 byte-order mark not allowed")
 	}
 	if !utf8.Valid(data) {
-		return jsonValue{}, false, rejectf("index", "index block is not valid UTF-8")
+		return jsonValue{}, rejectf("index", "index block is not valid UTF-8")
 	}
 	p := &jsonParser{data: data}
 	p.skipWS()
 	val, err := p.parseValue(0)
 	if err != nil {
-		return jsonValue{}, false, err
+		return jsonValue{}, err
 	}
 	p.skipWS()
 	if p.pos != len(p.data) {
-		return jsonValue{}, false, rejectf("index", "trailing data after JSON value")
+		return jsonValue{}, rejectf("index", "trailing data after JSON value")
 	}
-	return val, p.hasDupKey, nil
+	return val, nil
 }
 
 func (p *jsonParser) skipWS() {
@@ -135,7 +134,7 @@ func (p *jsonParser) parseObject(depth int) (jsonValue, error) {
 			return jsonValue{}, err
 		}
 		if _, dup := seen[key]; dup {
-			p.hasDupKey = true
+			return jsonValue{}, rejectf("index", "duplicate key in JSON object")
 		}
 		seen[key] = struct{}{}
 		p.skipWS()
@@ -202,7 +201,7 @@ func (p *jsonParser) parseString() (string, error) {
 	for p.pos < len(p.data) {
 		b := p.data[p.pos]
 		if b < 0x20 {
-			return "", rejectf("index", "unesscaped control character in JSON string"[0:1] + "nescaped control character in JSON string")
+			return "", rejectf("index", "unescaped control character in JSON string")
 		}
 		if b == '"' {
 			raw := p.data[start:p.pos]
@@ -341,26 +340,8 @@ func (p *jsonParser) parseNumber() (jsonValue, error) {
 	} else {
 		return jsonValue{}, rejectf("index", "invalid JSON number")
 	}
-	if p.pos < len(p.data) && p.data[p.pos] == '.' {
-		p.pos++
-		if p.pos >= len(p.data) || p.data[p.pos] < '0' || p.data[p.pos] > '9' {
-			return jsonValue{}, rejectf("index", "invalid fraction in JSON number")
-		}
-		for p.pos < len(p.data) && p.data[p.pos] >= '0' && p.data[p.pos] <= '9' {
-			p.pos++
-		}
-	}
-	if p.pos < len(p.data) && (p.data[p.pos] == 'e' || p.data[p.pos] == 'E') {
-		p.pos++
-		if p.pos < len(p.data) && (p.data[p.pos] == '+' || p.data[p.pos] == '-') {
-			p.pos++
-		}
-		if p.pos >= len(p.data) || p.data[p.pos] < '0' || p.data[p.pos] > '9' {
-			return jsonValue{}, rejectf("index", "invalid exponent in JSON number")
-		}
-		for p.pos < len(p.data) && p.data[p.pos] >= '0' && p.data[p.pos] <= '9' {
-			p.pos++
-		}
+	if p.pos < len(p.data) && (p.data[p.pos] == '.' || p.data[p.pos] == 'e' || p.data[p.pos] == 'E') {
+		return jsonValue{}, rejectf("index", "number with fraction or exponent not allowed")
 	}
 	return jsonValue{kind: jsonNumber, str: string(p.data[start:p.pos])}, nil
 }
@@ -369,67 +350,10 @@ func parseIndexUint53(v jsonValue) (uint64, error) {
 	if v.kind != jsonNumber {
 		return 0, rejectf("index", "expected integer")
 	}
-	s := v.str
-	neg := false
-	if strings.HasPrefix(s, "-") {
-		neg = true
-		s = s[1:]
-	}
-	var expPart string
-	if idx := strings.IndexAny(s, "eE"); idx >= 0 {
-		expPart = s[idx+1:]
-		s = s[:idx]
-	}
-	var intPart, fracPart string
-	if idx := strings.IndexByte(s, '.'); idx >= 0 {
-		intPart = s[:idx]
-		fracPart = s[idx+1:]
-	} else {
-		intPart = s
-	}
-	digits := strings.TrimLeft(intPart+fracPart, "0")
-	if digits == "" {
-		return 0, nil
-	}
-	if neg {
+	if strings.HasPrefix(v.str, "-") {
 		return 0, rejectf("index", "negative integer not allowed")
 	}
-	var exp int64
-	if expPart != "" {
-		expSign := int64(1)
-		if expPart[0] == '+' {
-			expPart = expPart[1:]
-		} else if expPart[0] == '-' {
-			expSign = -1
-			expPart = expPart[1:]
-		}
-		expPart = strings.TrimLeft(expPart, "0")
-		if len(expPart) > 8 {
-			if expSign > 0 {
-				return 0, rejectf("index", "integer exceeds 2^53-1")
-			}
-			return 0, rejectf("index", "non-integer number")
-		}
-		if expPart != "" {
-			u, err := strconv.ParseUint(expPart, 10, 32)
-			if err != nil {
-				return 0, rejectf("index", "invalid exponent")
-			}
-			exp = expSign * int64(u)
-		}
-	}
-	effExp := exp - int64(len(fracPart))
-	trimmed := strings.TrimRight(digits, "0")
-	effExp += int64(len(digits) - len(trimmed))
-	digits = trimmed
-	if effExp < 0 {
-		return 0, rejectf("index", "non-integer number")
-	}
-	if int64(len(digits))+effExp > 16 {
-		return 0, rejectf("index", "integer exceeds 2^53-1")
-	}
-	full := digits + strings.Repeat("0", int(effExp))
-	val, err := strconv.ParseUint(full, 10, 64)
+	val, err := strconv.ParseUint(v.str, 10, 64)
 	if err != nil || val > maxSafeInt {
 		return 0, rejectf("index", "integer exceeds 2^53-1")
 	}

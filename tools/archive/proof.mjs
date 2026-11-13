@@ -153,11 +153,12 @@ async function prove({ chain, org: org0, token, key, kind, fin }) {
     if (chain !== 8453) refuse('a base proof is for a Base project');
     const claims = await baseClaims({ fin, urls: PROOF_ENDPOINTS[1], deps });
     const game = kind === 'final' ? claims.anchor : claims.latest || refuse(`no claimed game: ${claims.latestWhy}`);
-    const l2 = new Evidence();
+    let l2 = new Evidence();
     const at = '0x' + game.l2Block.toString(16);
     let l2header, root, last;
     for (const url of BASE_PROOF_ENDPOINTS) {
       try {
+        l2 = new Evidence(); // nothing kept from an endpoint that failed part way
         const block = await call(url, 'eth_getBlockByNumber', [at, false]);
         l2header = headerRlp(block.hash, block);
         const hd = executionHeader(block.hash, block);
@@ -176,10 +177,11 @@ async function prove({ chain, org: org0, token, key, kind, fin }) {
     let logs = [];
     const claim = await confirmed({ fin, urls: PROOF_ENDPOINTS[1], chainId: 42161, deps: { provedAccount: deps.provedAccount, logs: async (q) => (logs = await allLogs(q)) } });
     const log = logs.find((l) => { const d = l.data.slice(2).match(/.{64}/g); return d && hash(l.topics[2], hash(...d.slice(13, 19)), d[19]) === claim.assertion; }) || refuse('no log hashes to the assertion');
-    const l2 = new Evidence();
+    let l2 = new Evidence();
     let l2header, root, last;
     for (const url of ROLLUPS[42161].endpoints) {
       try {
+        l2 = new Evidence();
         const block = await call(url, 'eth_getBlockByHash', [claim.blockHash, false]);
         l2header = headerRlp(claim.blockHash, block);
         const hd = executionHeader(claim.blockHash, block);
