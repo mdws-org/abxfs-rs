@@ -281,12 +281,22 @@ function validate_light_client_update(net, committee, raw, want) {
 //   checkpoint  the shipped block root, 0x-hex
 //   get(path)   fetches a beacon API path and returns the parsed JSON; the server behind it is not trusted
 //   now()       milliseconds; the reader's clock decides what is fresh
-// Returns { executionBlockHash, finalizedSlot, attestedSlot, signatureSlot, participants, periods, checkpointSlot }.
+// Returns { executionBlockHash, finalizedSlot, finalizedRoot, attestedSlot, signatureSlot, participants, periods, checkpointSlot }.
+// `finalizedRoot` is the beacon block root of the finalized block: a later run can start from it.
 async function sync({ net, checkpoint, get, now = Date.now }) {
   // Read afresh at each check: following a fortnight of committees can take longer than a slot.
   const wall = () => Math.floor((now() / 1000 - net.genesisTime) / SECONDS_PER_SLOT);
   const wallSlot = wall();
   const root = bytes(checkpoint, 32, 'the shipped block root');
+
+  // A chain that has moved to a fork this client does not list cannot be followed: the header and branch forms
+  // may have changed. Say so instead of failing a check further on. A server that does not answer this is not
+  // taken to mean anything.
+  const head = await get('/eth/v1/beacon/states/head/fork').catch(() => null);
+  const current = head && head.data && typeof head.data.current_version === 'string' ? head.data.current_version.toLowerCase() : null;
+  if (current && /^0x[0-9a-f]{8}$/.test(current) && !net.forks.some(([, , version]) => version === current)) {
+    throw new LightError('fork', `the consensus server reports fork version ${current} since epoch ${String(head.data.epoch).slice(0, 12)}, which this viewer does not read`);
+  }
 
   const boot = (await get(`/eth/v1/beacon/light_client/bootstrap/${checkpoint}`))?.data || refuse('the bootstrap reply is empty');
   const header = parseHeader(boot.header, 'bootstrap header');
@@ -338,6 +348,7 @@ async function sync({ net, checkpoint, get, now = Date.now }) {
   // `participants` are over a header that names an older block, and vouch only for the committee still signing.
   return {
     executionBlockHash: toHex(shipped ? shippedBlockHash : u.executionBlockHash), finalizedSlot, attestedSlot: u.attested.beacon.slot,
+    finalizedRoot: shipped ? toHex(root) : toHex(beaconBlockHeaderRoot(u.finalized.beacon)),
     signatureSlot: u.signatureSlot, participants: u.participants, periods: period - periodAt(checkpointSlot), checkpointSlot, shipped,
   };
 }

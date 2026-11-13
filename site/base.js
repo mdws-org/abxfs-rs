@@ -21,6 +21,8 @@ const word = (n) => BigInt(n).toString(16).padStart(64, '0');
 const hash = (...hex) => toHex(keccak256(fromHex(hex.map((h) => h.replace(/^0x/, '')).join(''))));
 const addressOf = (w) => '0x' + w.slice(-40);
 const refuse = (message) => { throw new ProvedError('check', message); };
+// The contracts on Ethereum are not the ones this viewer was written for: it cannot read them, and says so.
+const upgraded = (message) => { throw new ProvedError('upgraded', message); };
 
 // Ethereum mainnet. Addresses from docs.base.org; implementations and layouts from Sourcify (2026-11-11).
 const PORTAL = '0x49048044d57e1c92a77f79988d21fa8faf74e97e', PORTAL_IMPL = '0x03863ab7f64b733cff85c8ff44a86601c568ca70';
@@ -75,7 +77,7 @@ async function baseClaims({ fin, urls, deps = { provedAccount, provedCode } }) {
   const implementation = async (address, want, name, slots) => {
     const a = await read(address, [IMPLEMENTATION_SLOT, ...slots]);
     if (!a.exists) refuse(`${name} does not exist at the finalized block`);
-    if (addressOf(a.words[0]) !== want) refuse(`${name} has been upgraded since this viewer was written, so its storage is not read`);
+    if (addressOf(a.words[0]) !== want) upgraded(`${name} has been upgraded since this viewer was written, so its storage is not read`);
     return { words: a.words.slice(1), block: a.block };
   };
   const portal = await implementation(PORTAL, PORTAL_IMPL, 'OptimismPortal2', [SLOT(62)]);
@@ -86,7 +88,7 @@ async function baseClaims({ fin, urls, deps = { provedAccount, provedCode } }) {
   if (Number(packed & 0xffffffffn) !== GAME_TYPE) refuse('the registry respects a game type this viewer does not read');
   const retirementTimestamp = Number((packed >> 32n) & 0xffffffffffffffffn);
   const factory = await implementation(FACTORY, FACTORY_IMPL, 'DisputeGameFactory', [hash(word(GAME_TYPE), word(101)), SLOT(104)]);
-  if (addressOf(factory.words[0]) !== '0x' + GAME_IMPL) refuse('the factory creates games from another implementation');
+  if (addressOf(factory.words[0]) !== '0x' + GAME_IMPL) upgraded('the factory creates games from another implementation');
   const count = BigInt(factory.words[1]);
   if (count === 0n) refuse('the factory has created no games');
 

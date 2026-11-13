@@ -225,7 +225,17 @@ Opened from disk it reaches the same states as the served page, with these diffe
 
 ### A starting block of your own
 
-A proof starts from one block root. The one built into the viewer is replaced each week by a workflow. The check page also accepts a finalized block root that the reader types in, from a beacon node or a checkpoint provider they trust (`site/start.js`). On a hostname it is kept in that browser. A page opened from disk shares stored data with other local files in some browsers, so there it is used until the page is closed and is not kept. The light client applies the same rules to it. A beacon node must be able to start a light client from that block, and the block must be no older than 14 days. The page cannot tell where a reader's root came from, so it counts only when the sync committee's signatures lead from it to a newer finalized block. The built-in block alone may stand as the newest finalized one. The check page names which block a proof started from, under the verdict and in the facts, and shows the built-in one beside a reader's. The service worker on a project's hostname uses the built-in block only.
+A proof starts from one block root. The one built into the viewer is replaced each week by a workflow. The check page also accepts a finalized block root that the reader types in, from a beacon node or a checkpoint provider they trust (`site/start.js`). On a hostname it is kept in that browser. A page opened from disk shares stored data with other local files in some browsers, so there it is used until the page is closed and is not kept. The light client applies the same rules to it. A beacon node must be able to start a light client from that block, and the block must be no older than 14 days. The page cannot tell where a reader's root came from, so it counts only when the sync committee's signatures lead from it to a newer finalized block. The built-in block alone may stand as the newest finalized one. The check page names which block a proof started from, under the verdict and in the facts, and shows the built-in one beside a reader's.
+
+On a hostname the check page also remembers the newest finalized block it reached, and the next visit starts there when that block is newer than the built-in one. A reader who keeps visiting therefore never meets the 14-day limit, whether or not the built-in block is refreshed. A reader's own root is never the start of something remembered. When the built-in or remembered block has expired and the reader gave none, the page asks the consensus servers for their finalized block and starts from one at least two of them report alike. The facts and a line under the verdict say so, since that start rests on those servers and not on anything the viewer shipped with. The public checkpoint-sync services (beaconcha.in, Sigma Prime, EthStaker, Stakely, Invis) do not allow a page to read them, so they cannot take part. The page lists them as places to get a root by hand.
+
+### Your own nodes
+
+The check page takes a consensus node and an execution node of the reader's own, asked before the public ones. Before one is used, a consensus node must report this chain's genesis and serve the light client routes, and an execution node must be on this chain and serve proofs at the finalized block. A node is asked only for data: what it returns is checked like any server's. A browser asks a node from this page only at an https address or at http on localhost, and only when the node allows requests from other sites (CORS). With both given, nothing on the page depends on a public server except for comparison.
+
+### When proving stops because the chain moved on
+
+Two causes get a state of their own (`outdated`) instead of "agreed". The first is an Ethereum fork the light client does not list: before following the committee, it asks each consensus server for the current fork version and stops with that version named when it is not one it reads. It says so only when no server got it through. The second is rollup contracts on Ethereum upgraded after the viewer was written: the pinned implementations no longer match. Either way the page says the viewer must be updated, and what is shown rests on the endpoints agreeing. The service worker on a project's hostname uses the built-in block only.
 
 ### Arbitrum One and Robinhood Chain
 
@@ -289,6 +299,7 @@ node tests/evm-chains.mjs       # what the EVM refuses on Base and Arbitrum One
 node tests/recheck.mjs          # the service worker's warning for a token page it computes differently
 node tests/evm-rollup-live.mjs               # live: 7 calls over Base and Arbitrum One state at their claims' blocks equal eth_call there
 node tests/recheck-page.mjs                  # live: a token page is served at once and recomputed behind it
+node tests/check-start.mjs                   # live: a remembered starting block, the reader's own nodes, an unknown fork
 node tests/check-file.mjs                    # live: the one-file check page opened from disk (ENGINE=chromium|webkit|firefox)
 node tests/worker-page.mjs                   # live: the check page's worker runs a call, is ended when it never answers, and may be missing
 node tests/evm-context-live.mjs              # live: gas left, base fee, caller and 15 more values, the same here and on the endpoints
