@@ -80,6 +80,16 @@ pub struct ChainTree {
     pub dirs: HashMap<H256, Vec<DirEntry>>,
     /// Empty when the read skipped file contents.
     pub files: HashMap<H256, FileRead>,
+    /// What every check above rested on, for an archive bundle: each directory's root node, every node blob, and
+    /// each chunk's backend and input hash. A chunk's data is its slice of the file's content.
+    pub evidence: Evidence,
+}
+
+#[derive(Default)]
+pub struct Evidence {
+    pub dir_roots: HashMap<H256, H256>,
+    pub nodes: HashMap<H256, Vec<u8>>,
+    pub chunks: HashMap<H256, (Address, H256)>,
 }
 
 /// One path under the root, `""` for the root itself.
@@ -189,6 +199,8 @@ struct Walk<'a> {
     fallback_read: HashMap<H256, Vec<u8>>,
     fallback_input: HashMap<H256, Vec<u8>>,
     chunk_data: HashMap<H256, Vec<u8>>,
+    blobs: HashMap<H256, Vec<u8>>,
+    input_hashes: HashMap<H256, H256>,
 }
 
 /// Read `root` (file or directory). With `content`, every file is fetched and checked byte for byte; without it,
@@ -219,6 +231,8 @@ pub fn read_tree(client: &Client, root: &H256, content: bool) -> Result<ChainTre
         fallback_read: HashMap::new(),
         fallback_input: HashMap::new(),
         chunk_data: HashMap::new(),
+        blobs: HashMap::new(),
+        input_hashes: HashMap::new(),
     };
     match kind {
         Kind::Directory => {
@@ -399,6 +413,7 @@ impl Walk<'_> {
             Ask::DirNode(id) => {
                 let (blob, level, count, size) = decode_node(&ret_ok(&out, &format!("DirectoryStore.getNode {}", h(&id)))?)?;
                 self.check_node(&id, ENTRY_NODE_PREFIX, &blob, level)?;
+                self.blobs.insert(id, blob.clone());
                 if size != 0 {
                     return Err(format!("directory node {} reports size {size}", h(&id)));
                 }
@@ -443,6 +458,7 @@ impl Walk<'_> {
             Ask::FileNode(id) => {
                 let (blob, level, count, size) = decode_node(&ret_ok(&out, &format!("FileStore.getNode {}", h(&id)))?)?;
                 self.check_node(&id, CHUNK_NODE_PREFIX, &blob, level)?;
+                self.blobs.insert(id, blob.clone());
                 let node = parse_file_node(&id, &blob, count, size)?;
                 match &node {
                     FileNode::Branch { level, children, .. } => {
@@ -508,7 +524,7 @@ impl Walk<'_> {
     /// Check and inflate chunks fetched as code, in parallel.
     fn take_codes(&mut self, ids: &[H256], codes: Vec<Vec<u8>>) -> Result<()> {
         let recs: Vec<Record> = ids.iter().map(|id| self.records[id]).collect();
-        let done: Vec<Result<Vec<u8>>> = ids
+        let done: Vec<Result<(H256, Vec<u8>)>> = ids
             .par_iter()
             .zip(codes.into_par_iter())
             .zip(recs.par_iter())
@@ -519,11 +535,13 @@ impl Walk<'_> {
                 let input = &code[1..];
                 let data = if r.backend == FASTLZ_BACKEND.address { fastlz::decompress(input)? } else { input.to_vec() };
                 check_chunk(id, r, input, &data)?;
-                Ok(data)
+                Ok((keccak256(input), data))
             })
             .collect();
         for (id, d) in ids.iter().zip(done) {
-            self.chunk_data.insert(*id, d?);
+            let (input_hash, data) = d?;
+            self.input_hashes.insert(*id, input_hash);
+            self.chunk_data.insert(*id, data);
         }
         Ok(())
     }
@@ -532,6 +550,7 @@ impl Walk<'_> {
         if let (Some(data), Some(input)) = (self.fallback_read.get(&id), self.fallback_input.get(&id)) {
             let r = self.records[&id];
             check_chunk(&id, &r, input, data)?;
+            self.input_hashes.insert(id, keccak256(input));
             let data = self.fallback_read.remove(&id).unwrap();
             self.fallback_input.remove(&id);
             self.chunk_data.insert(id, data);
@@ -589,7 +608,9 @@ impl Walk<'_> {
             }
             files.insert(cid, FileRead { info, chunks, content: Some(content) });
         }
-        let tree = ChainTree { root, kind, dirs, files };
+        let chunks = self.input_hashes.iter().map(|(id, ih)| (*id, (self.records[id].backend, *ih))).collect();
+        let evidence = Evidence { dir_roots: self.dir_root.clone(), nodes: std::mem::take(&mut self.blobs), chunks };
+        let tree = ChainTree { root, kind, dirs, files, evidence };
         let paths = tree.paths()?;
         if self.content {
             for p in &paths {

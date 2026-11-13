@@ -19,6 +19,8 @@ const USAGE: &str = "usage:
   abxfs-rs read <project> [--rpc URL] [--out PATH] [--in-flight N]
   abxfs-rs root <project> [--rpc URL]
   abxfs-rs serve [--port N] [--rpc URL]
+  abxfs-rs bundle <project> --key abxfs.cid|bamfs.cid --root <root> --proof <proof.json> --out <bundle.car> [--rpc URL]
+  abxfs-rs verify-bundle <bundle.car> [--out DIR]
   abxfs-rs verify <root> <local folder or file> --chain <name> [--rpc URL] [--in-flight N] [--include-hidden] [--no-fastlz]
 
 plan     Plans an ABX FS upload of <folder> offline: every chunk id, node, file CID, directory CID, the root,
@@ -39,6 +41,14 @@ root     Prints a project's current root. A project is <chain id>-<org contract>
 
 serve    Serves projects on this machine at http://<project>.localhost:<port>/ (default port 8090), each file read
          from chain and checked as read checks it. Answers only names under localhost.
+
+bundle   Writes an archive bundle (archive/ARCHIVE.md) of one version of a project: the content of <root>, read
+         and checked from chain, with the binding proof in <proof.json> (made by tools/archive/proof.mjs). The bundle
+         is verified before it is written; its listing goes to standard output.
+
+verify-bundle
+         Checks a bundle offline, as archive/ARCHIVE.md defines, and prints its listing (exit 0), or one line
+         reject <class> <message> (exit 1). With --out, writes its files under DIR.
 
 verify   Plans the local folder or file offline and compares its root with <root>. When they match, checks that
          every chunk, node, file and directory the plan needs exists on chain; when they differ, reads the chain
@@ -92,6 +102,8 @@ fn run(args: &[String]) -> Result<(), Fail> {
     match cmd.as_str() {
         "plan" => Ok(cmd_plan(rest)?),
         "read" | "verify" => chain_cmd(cmd, rest),
+        "bundle" => Ok(cmd_bundle(rest)?),
+        "verify-bundle" => cmd_verify_bundle(rest),
         "root" => Ok(cmd_root(rest)?),
         "serve" => Ok(cmd_serve(rest)?),
         _ => Err(Fail::Error(format!("unknown command \"{cmd}\"\n\n{USAGE}"))),
@@ -228,6 +240,74 @@ fn write_bamfs(tree: &abxfs::bamfs::Tree, out: &std::path::Path) -> Result<(), S
     }
     println!("verified and wrote BAMFS generation {} ({} files, {bytes} bytes) to {}", tree.generation, tree.files.len(), out.display());
     Ok(())
+}
+
+fn cmd_bundle(rest: &[String]) -> Result<(), String> {
+    let (mut label, mut key, mut root, mut proof, mut out, mut rpc) = (None, None, None, None, None, None);
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
+        match a.as_str() {
+            "--key" => key = Some(value("--key")?),
+            "--root" => root = Some(value("--root")?),
+            "--proof" => proof = Some(value("--proof")?),
+            "--out" => out = Some(value("--out")?),
+            "--rpc" => rpc = Some(value("--rpc")?),
+            s if label.is_none() && !s.starts_with('-') => label = Some(s.to_string()),
+            s => return Err(format!("unexpected argument \"{s}\"")),
+        }
+    }
+    let (Some(label), Some(key), Some(root), Some(proof), Some(out)) = (label, key, root, proof, out) else { return Err(USAGE.to_string()) };
+    let project = parse_label(&label).ok_or_else(|| format!("{label} is not <chain id>-<org contract>-<project number>"))?;
+    let root = parse_h256(&root)?;
+    let proof: serde_json::Value = serde_json::from_slice(&std::fs::read(&proof).map_err(|e| format!("{proof}: {e}"))?).map_err(|e| format!("the proof file is not JSON: {e}"))?;
+    let mut blocks = Vec::new();
+    let content = match key.as_str() {
+        "abxfs.cid" => {
+            let client = Client::connect(project.chain, rpc.as_deref(), 8)?;
+            let tree = read_tree(&client, &root, true)?;
+            abxfs::bundle::abxfs_content(&tree, &mut blocks)?
+        }
+        "bamfs.cid" => {
+            let tree = bamfs_read(&project, rpc.as_deref(), &root, abxfs::serve::MAX_TREE_BYTES)?;
+            abxfs::bundle::bamfs_content(&root, &tree, &mut blocks)?
+        }
+        k => return Err(format!("--key must be abxfs.cid or bamfs.cid, not {k}")),
+    };
+    let token = project.token.to_string();
+    let bytes = abxfs::bundle::assemble(project.chain.id, &project.org, &token, &key, &root, proof, content, blocks)?;
+    let v = abxfs::bundle_verify::verify(&bytes).map_err(|r| format!("the bundle made does not verify: {} {}", r.class, r.message))?;
+    std::fs::write(&out, &bytes).map_err(|e| format!("{out}: {e}"))?;
+    print!("{}", v.listing);
+    eprintln!("wrote {out}: {} bytes, index {}", bytes.len(), abxfs::car::cid_text(&v.index_cid));
+    Ok(())
+}
+
+fn cmd_verify_bundle(rest: &[String]) -> Result<(), Fail> {
+    let (mut file, mut out) = (None, None);
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--out" => out = Some(PathBuf::from(it.next().ok_or_else(|| Fail::Error("--out needs a value".into()))?)),
+            s if file.is_none() && !s.starts_with('-') => file = Some(s.to_string()),
+            s => return Err(Fail::Error(format!("unexpected argument \"{s}\""))),
+        }
+    }
+    let file = file.ok_or_else(|| Fail::Error(USAGE.into()))?;
+    let bytes = std::fs::read(&file).map_err(|e| Fail::Error(format!("{file}: {e}")))?;
+    match abxfs::bundle_verify::verify(&bytes) {
+        Ok(v) => {
+            if let Some(dir) = out {
+                abxfs::bundle_verify::write_files(&v, &dir).map_err(Fail::Error)?;
+            }
+            print!("{}", v.listing);
+            Ok(())
+        }
+        Err(r) => {
+            println!("reject {} {}", r.class, r.message);
+            std::process::exit(1);
+        }
+    }
 }
 
 fn cmd_root(rest: &[String]) -> Result<(), String> {

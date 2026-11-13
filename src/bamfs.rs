@@ -58,6 +58,28 @@ pub struct Tree {
     pub unusable: Vec<String>,
     /// Bytes of distinct file contents held.
     pub bytes: usize,
+    /// What every check rested on, for an archive bundle.
+    pub evidence: Evidence,
+}
+
+/// The records and blobs a BAMFS read checked, keyed by id or CID, with names and types as the raw bytes stored.
+#[derive(Default)]
+pub struct Evidence {
+    pub dir_roots: HashMap<H256, H256>,
+    pub dir_entries: HashMap<H256, Vec<(Vec<u8>, bool, H256)>>,
+    pub nodes: HashMap<H256, Vec<u8>>,
+    pub files: HashMap<H256, FileEvidence>,
+    pub chunks: HashMap<H256, Vec<u8>>,
+}
+
+#[derive(Clone)]
+pub struct FileEvidence {
+    pub root: H256,
+    pub chunk_ids: Vec<H256>,
+    pub mime: Vec<u8>,
+    pub compression: u8,
+    pub output_hash: H256,
+    pub size: usize,
 }
 
 fn h(parts: &[&[u8]]) -> H256 {
@@ -72,6 +94,7 @@ struct Ctx<'a> {
     rpc: &'a Rpc,
     block: String,
     calls: AtomicU64,
+    ev: &'a std::cell::RefCell<Evidence>,
 }
 
 impl Ctx<'_> {
@@ -171,6 +194,7 @@ fn node(ctx: &Ctx, store: &str, id: &H256, prefix: u8, seen: &mut usize) -> Resu
     if blob.is_empty() {
         return Err(format!("node {} is empty", to_hex(id)));
     }
+    ctx.ev.borrow_mut().nodes.insert(*id, blob.clone());
     Ok(blob)
 }
 
@@ -244,6 +268,7 @@ fn list2(ctx: &Ctx, cid: &H256, seen: &mut usize) -> Result<Vec<Entry>> {
     if h(&[&[0x12], &root]) != *cid {
         return Err(format!("directory {}: its root node does not hash to its CID", to_hex(cid)));
     }
+    ctx.ev.borrow_mut().dir_roots.insert(*cid, root);
     let mut blobs = Vec::new();
     leaves(ctx, DIRS2, &root, 0x22, 36, None, seen, &mut blobs)?;
     let mut out = Vec::new();
@@ -274,6 +299,8 @@ fn info2(ctx: &Ctx, cid: &H256) -> Result<Info> {
     if h(&[&[0x11], &info.root, &keccak256(&mime_bytes), &[info.compression], &info.output_hash]) != *cid {
         return Err(format!("file {}: its record does not hash to its CID", to_hex(cid)));
     }
+    let fe = FileEvidence { root: info.root, chunk_ids: Vec::new(), mime: mime_bytes, compression: info.compression, output_hash: info.output_hash, size: info.size };
+    ctx.ev.borrow_mut().files.insert(*cid, fe);
     Ok(info)
 }
 
@@ -308,6 +335,7 @@ fn list1(ctx: &Ctx, cid: &H256) -> Result<Vec<Entry>> {
     }
     let mut out = Vec::new();
     let mut hashes = Vec::new();
+    let mut raw = Vec::new();
     for i in 0..n {
         let t = base + 32 + r.uint(base + 32 + 32 * i)?;
         let name = r.bytes(t + r.uint(t)?)?.to_vec();
@@ -315,10 +343,12 @@ fn list1(ctx: &Ctx, cid: &H256) -> Result<Vec<Entry>> {
         let is_dir = r.bool(t + 64)?;
         hashes.extend_from_slice(&h(&[&keccak256(&name), &child, &[is_dir as u8]]));
         out.push(Entry { name: utf8(&name, "an entry name")?, is_dir, cid: child });
+        raw.push((name, is_dir, child));
     }
     if h(&[&[0x02], &keccak256(&hashes)]) != *cid {
         return Err(format!("directory {}: its entries do not hash to its CID", to_hex(cid)));
     }
+    ctx.ev.borrow_mut().dir_entries.insert(*cid, raw);
     Ok(out)
 }
 
@@ -349,6 +379,8 @@ fn info1(ctx: &Ctx, cid: &H256) -> Result<Info> {
     if h(&[&[0x01], &keccak256(&ids.concat()), &keccak256(&mime_bytes), &[info.compression], &info.output_hash]) != *cid {
         return Err(format!("file {}: its record does not hash to its CID", to_hex(cid)));
     }
+    let fe = FileEvidence { root: [0u8; 32], chunk_ids: ids.clone(), mime: mime_bytes, compression: info.compression, output_hash: info.output_hash, size: 0 };
+    ctx.ev.borrow_mut().files.insert(*cid, fe);
     Ok(info)
 }
 
@@ -420,7 +452,7 @@ fn decode(algorithm: u8, bytes: &[u8], limit: usize) -> Result<Vec<u8>> {
 
 /// A file's bytes, with a read budget of its own (as the viewer gives each file).
 fn read_file(walk: &Ctx, cid: &H256, info: &Info) -> Result<Vec<u8>> {
-    let ctx = &Ctx { rpc: walk.rpc, block: walk.block.clone(), calls: AtomicU64::new(0) };
+    let ctx = &Ctx { rpc: walk.rpc, block: walk.block.clone(), calls: AtomicU64::new(0), ev: walk.ev };
     let list = if info.generation == 2 { chunks2(ctx, info)? } else { info.chunks.clone() };
     if list.len() > MAX_CHUNKS {
         return Err(format!("the file has more than {MAX_CHUNKS} chunks"));
@@ -443,6 +475,7 @@ fn read_file(walk: &Ctx, cid: &H256, info: &Info) -> Result<Vec<u8>> {
         if total > MAX_FILE_BYTES {
             return Err(format!("the file stores more than {} MiB", MAX_FILE_BYTES / 1048576));
         }
+        ctx.ev.borrow_mut().chunks.insert(*id, payload.to_vec());
         stored.push(payload.to_vec());
     }
     let algorithm = info.compression & 0x7f;
@@ -484,7 +517,8 @@ fn exists(ctx: &Ctx, store: &str, sig: &str, cid: &H256) -> Result<bool> {
 /// distinct file contents.
 pub fn read(rpc: &Rpc, root: &H256, max_bytes: usize) -> Result<Tree> {
     let block = rpc.call("eth_blockNumber", json!([]))?.map_err(|e| e.to_string())?;
-    let ctx = Ctx { rpc, block: block.as_str().ok_or("no block number")?.to_string(), calls: AtomicU64::new(0) };
+    let ev = std::cell::RefCell::new(Evidence::default());
+    let ctx = Ctx { rpc, block: block.as_str().ok_or("no block number")?.to_string(), calls: AtomicU64::new(0), ev: &ev };
     let mut top: Option<(u8, bool)> = None;
     for (g, dirs, files) in [(2u8, DIRS2, FILES2), (1u8, DIRS1, FILES1)] {
         if exists(&ctx, dirs, "directoryExists(bytes32)", root)? {
@@ -497,7 +531,7 @@ pub fn read(rpc: &Rpc, root: &H256, max_bytes: usize) -> Result<Tree> {
         }
     }
     let (generation, is_dir) = top.ok_or("no BAMFS store holds this root")?;
-    let tree = Tree { is_file: !is_dir, generation, dirs: Vec::new(), files: Vec::new(), unusable: Vec::new(), bytes: 0 };
+    let tree = Tree { is_file: !is_dir, generation, dirs: Vec::new(), files: Vec::new(), unusable: Vec::new(), bytes: 0, evidence: Evidence::default() };
     if !is_dir {
         let mut tree = tree;
         let i = if generation == 2 { info2(&ctx, root)? } else { info1(&ctx, root)? };
@@ -507,11 +541,16 @@ pub fn read(rpc: &Rpc, root: &H256, max_bytes: usize) -> Result<Tree> {
         }
         tree.bytes = content.len();
         tree.files.push(File { path: String::new(), mime: i.mime, content: Arc::new(content) });
+        drop(ctx);
+        tree.evidence = ev.into_inner();
         return Ok(tree);
     }
     let mut walk = Walk { ctx: &ctx, generation, seen: 0, count: 0, path: HashSet::new(), tree, contents: HashMap::new(), max_bytes };
     walk.descend(root, "", 0)?;
-    Ok(walk.tree)
+    let mut tree = walk.tree;
+    drop(ctx);
+    tree.evidence = ev.into_inner();
+    Ok(tree)
 }
 
 struct Walk<'a> {
