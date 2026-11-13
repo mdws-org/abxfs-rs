@@ -106,7 +106,11 @@ async function l2Param({ urls, header, at, org, token, key, ev, extra = [] }) {
       const words = slots.map((s, i) => storageAt(acct.storageRoot, s, r.storageProof[i].proof));
       ev.add(org, r.accountProof, slots.map((s) => s.toLowerCase()), r.storageProof);
       return words[0];
-    } catch (e) { last = e; }
+    } catch (e) {
+      // A contract the proof shows absent is an answer, not an endpoint's failure: another endpoint cannot change it.
+      if (/does not exist/.test(e.message)) throw e;
+      last = e;
+    }
   }
   throw last;
 }
@@ -162,7 +166,7 @@ async function prove({ chain, org: org0, token, key, kind, fin }) {
         const out = hash('0'.repeat(64), hd.stateRoot, accountAt(hd.stateRoot, '0x4200000000000000000000000000000000000016', passer.proof).storageRoot, block.hash);
         if (out !== game.rootClaim) refuse('the L2 block does not make the claim');
         break;
-      } catch (e) { last = e; root = undefined; }
+      } catch (e) { if (/does not exist/.test(e.message)) throw e; last = e; root = undefined; }
     }
     if (root === undefined) throw last;
     return { root, proof: { kind: 'base', final: kind === 'final', l1: { header, accounts: l1.list(), codes: [...l1.codes.values()].sort() }, game: game.proxy, l2: { header: l2header, accounts: l2.list() } } };
@@ -181,7 +185,7 @@ async function prove({ chain, org: org0, token, key, kind, fin }) {
         const hd = executionHeader(claim.blockHash, block);
         root = await l2Param({ urls: [url], header: hd, at: '0x' + hd.number.toString(16), org, token, key, ev: l2 });
         break;
-      } catch (e) { last = e; root = undefined; }
+      } catch (e) { if (/does not exist/.test(e.message)) throw e; last = e; root = undefined; }
     }
     if (root === undefined) throw last;
     return { root, proof: { kind: 'arbitrum', l1: { header, accounts: l1.list() }, log: { parent: log.topics[2].toLowerCase(), data: log.data.toLowerCase() }, l2: { header: l2header, accounts: l2.list() } } };

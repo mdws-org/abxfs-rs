@@ -162,10 +162,10 @@ function bamfs2() {
   const st = { dirs: [], files: [], nodes: {}, chunks: {}, blocks: new Map() };
   const node = (prefix, blob) => { const id = K(Uint8Array.of(prefix), blob); st.nodes[hex(id)] = blob; return id; };
   const tree = (prefix, ids, pad) => (ids.length === 1 ? ids[0] : node(prefix, cat(Uint8Array.of(1), u(ids.length, 2), ...ids.map((id) => cat(id, new Uint8Array(pad))))));
-  st.file = (body, { mime = 'text/plain', compression = 0, chunkSize = 40, leafChunks = 3 } = {}) => {
+  st.file = (body, { mime = 'text/plain', compression = 0, chunkSize = 40, leafChunks = 3, zeroRoot = false } = {}) => {
     const m = enc.encode(mime), f = {};
     let oh = Z32, root = Z32;
-    if (compression) { oh = K(body); f.content = bstr(body, st.blocks); root = K(enc.encode('opaque'), body); } else {
+    if (compression) { oh = K(body); f.content = bstr(body, st.blocks); root = zeroRoot ? Z32 : K(enc.encode('opaque'), body); } else {
       const cs = [];
       for (let i = 0; i < body.length; i += chunkSize) { const d = body.subarray(i, i + chunkSize); const id = K(BACKEND, d); st.chunks[hex(id)] = bstr(d, st.blocks); cs.push(cat(id, u(d.length, 2))); }
       const leaves = [];
@@ -267,9 +267,11 @@ const reject = (name, cls, b) => vectors.push([name, b, `reject ${cls}\n`]);
   const s = bamfs2();
   const a = bytes(500, 5), b = enc.encode('second');
   const fa = s.file(a), fb = s.file(b, { compression: 1, mime: 'text/plain' });
-  const root = s.dir([{ name: enc.encode('a.bin'), cid: fa }, { name: enc.encode('b.txt'), cid: fb }, { name: enc.encode('c.txt'), cid: fb }]);
+  // A compressed file whose root is zero: its root is never walked.
+  const d = enc.encode('zero root'), fd = s.file(d, { compression: 6, zeroRoot: true });
+  const root = s.dir([{ name: enc.encode('a.bin'), cid: fa }, { name: enc.encode('b.txt'), cid: fb }, { name: enc.encode('c.txt'), cid: fb }, { name: enc.encode('d.txt'), cid: fd }]);
   accept('synthetic-bamfs2', 'bamfs.cid', 'bamfs2', root, s.content(), s.blocks,
-    [{ path: [enc.encode('a.bin')], body: a }, { path: [enc.encode('b.txt')], body: b }, { path: [enc.encode('c.txt')], body: b }]);
+    [{ path: [enc.encode('a.bin')], body: a }, { path: [enc.encode('b.txt')], body: b }, { path: [enc.encode('c.txt')], body: b }, { path: [enc.encode('d.txt')], body: d }]);
 }
 
 /* ── rejected vectors ── */

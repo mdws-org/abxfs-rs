@@ -56,13 +56,19 @@ async function currentRoots(c) {
         if (attempt) await sleep(3000 * attempt);
         answers = (await Promise.allSettled(heights.map(([u]) => post(u, calls, 30_000)))).filter((x) => x.status === 'fulfilled' && Array.isArray(x.value) && x.value.every((r) => r.result !== undefined || r.error)).map((x) => x.value);
       }
-      if (answers.length < 2) throw new Error(`fewer than two endpoints answered for ${c.address}`);
-      toks.forEach((t, i) => {
-        const got = answers.map((a) => a.find((r) => r.id === i)).map((r) => (r?.result ? r.result.slice(0, 66).toLowerCase() : r?.error && /revert/i.test(r.error.message || '') ? '0x' + '0'.repeat(64) : null)).filter(Boolean);
+      // An endpoint that refuses whole batches is asked item by item below.
+      const value = (r) => (r?.result && r.result.length >= 66 ? r.result.slice(0, 66).toLowerCase() : r?.error && /revert/i.test(r.error.message || '') ? '0x' + '0'.repeat(64) : null);
+      for (const [i, t] of toks.entries()) {
+        let got = answers.map((a) => value(a.find((r) => r.id === i))).filter(Boolean);
+        // An endpoint may refuse some items of a batch (a rate limit): ask for those one at a time.
+        for (let attempt = 0; attempt < 3 && got.length < 2; attempt++) {
+          await sleep(1500 * (attempt + 1));
+          got = (await Promise.allSettled(heights.map(([u]) => post(u, { ...calls[i], id: 1 })))).filter((x) => x.status === 'fulfilled').map((x) => value(x.value)).filter(Boolean);
+        }
         if (got.length < 2) throw new Error(`fewer than two endpoints answered for ${c.address} token ${t}`);
         if (new Set(got).size > 1) throw new Error(`the endpoints disagree about ${c.address} token ${t} ${key}`);
         if (!/^0x0+$/.test(got[0])) out.push({ token: String(t), key, root: got[0], block, endpoints: heights.map(([u]) => new URL(u).host) });
-      });
+      }
     }
   }
   return out;
@@ -88,8 +94,13 @@ async function loggedRoots(chainId, addresses, head) {
     for (const a of Object.keys(addresses)) {
       let params = '';
       for (let page = 0; page < 50; page++) {
-        const r = await fetch(`${BLOCKSCOUT_V2}/addresses/${a}/logs${params}`, { signal: AbortSignal.timeout(30_000) });
-        if (!r.ok) throw new Error(`Blockscout answered ${r.status} for ${a}`);
+        let r;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          r = await fetch(`${BLOCKSCOUT_V2}/addresses/${a}/logs${params}`, { signal: AbortSignal.timeout(30_000) }).catch(() => null);
+          if (r?.ok) break;
+          await sleep(5000 * (attempt + 1));
+        }
+        if (!r?.ok) throw new Error(`Blockscout answered ${r ? r.status : 'nothing'} for ${a}`);
         const j = await r.json();
         for (const l of j.items || []) {
           if ((l.topics?.[0] || '').toLowerCase() !== TOPIC || Number(l.block_number) < addresses[a]) continue;

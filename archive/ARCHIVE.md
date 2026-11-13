@@ -269,7 +269,7 @@ The branch counts are covered by the node ids and are not checked.
   "chunks": { "<32-byte hex id>": <byte string>, ... } }
 ```
 
-`BACKEND = 0x91520cdaaab44267e99d08fea7730d7a7c60e9c2`. Lists, reachability and duplicates as in section 7. A root of all zeros is not special here, unlike section 7: it names a node like any other id, so a directory or file whose root is zero cannot be read and is a failure. Failures are class `content`.
+`BACKEND = 0x91520cdaaab44267e99d08fea7730d7a7c60e9c2`. Lists, reachability and duplicates as in section 7. A root of all zeros is not special here, unlike section 7: it names a node like any other id, so a directory, or a file with `compression` 0, whose root is zero cannot be read and is a failure. (A compressed file's root is never walked, so its value does not matter.) Failures are class `content`.
 
 **Directory**: `cid == H(0x12 ‖ root)`. Walk nodes from `root`: `H(0x22 ‖ blob) == id`, level byte 0 to 3, each child one level below its parent; a branch is `level ‖ u16(n) ‖ n × ( id:32 ‖ 4 more bytes )`, `2 ≤ n ≤ 128`, length exactly `3 + 36·n`; a leaf is as in section 7 (same layout of offsets and records). Entries, duplicates and loops as in section 7.
 
