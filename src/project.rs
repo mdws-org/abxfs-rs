@@ -19,7 +19,7 @@ const TOKEN_PARAM: &str = "6bd39222";
 /// The parameter names, as 32 bytes: "abxfs.cid" for ABX FS, "bamfs.cid" for the store before it.
 const KEY_ABXFS: &str = "61627866732e636964";
 const KEY_BAMFS: &str = "62616d66732e636964";
-/// Blocks an endpoint may be from the middle of the others and still be asked (about two minutes).
+/// Blocks an endpoint may be from the middle of the others and still be asked (the from-chain viewer's limits).
 fn max_lag(chain_id: u64) -> u64 {
     match chain_id {
         1 | 11155111 => 10,
@@ -76,7 +76,7 @@ pub fn parse_label(s: &str) -> Option<Project> {
 }
 
 /// Which store the root belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Store {
     AbxFs,
     Bamfs,
@@ -128,14 +128,15 @@ fn endpoints(project: &Project, own: Option<&str>) -> Result<(Vec<(Rpc, String)>
     let middle = *blocks.get(blocks.len().saturating_sub(1) / 2).ok_or_else(|| format!("no endpoint for {} answered", project.chain.name))?;
     let near: Vec<(Rpc, String, u64)> = up.into_iter().filter(|u| u.2.abs_diff(middle) <= max_lag(project.chain.id)).collect();
     if near.len() < need {
-        return Err(format!("fewer than two endpoints for {} are at the same height, and a project's current version needs two that agree", project.chain.name));
+        return Err(format!("fewer than {need} endpoints for {} are at the same height, and a project's current version needs {need} that agree", project.chain.name));
     }
     let block = near.iter().map(|u| u.2).min().expect("at least one");
     Ok((near.into_iter().map(|(r, u, _)| (r, u)).collect(), block))
 }
 
 /// One token parameter from every endpoint at `block`. A revert is an answer: the contract has no such
-/// parameter, recorded as the zero root.
+/// parameter, recorded as the zero root. Any other error, and a reply that is not a 32-byte word, is not an
+/// answer: that endpoint is left out, as the viewer leaves it out.
 fn param(eps: &[(Rpc, String)], project: &Project, key: &str, block: u64, need: usize) -> Result<(H256, Vec<String>)> {
     let data = format!("0x{TOKEN_PARAM}{:064x}{key:0<64}", project.token);
     let mut got: Vec<(String, H256)> = Vec::new();
@@ -145,22 +146,21 @@ fn param(eps: &[(Rpc, String)], project: &Project, key: &str, block: u64, need: 
             Err(_) => continue,
         };
         let root = match reply {
-            Ok(v) => {
-                let bytes = from_hex(v.as_str().unwrap_or("")).map_err(|e| format!("{}: {e}", host(url)))?;
-                if bytes.len() < 32 {
-                    return Err(format!("{} returned too little for tokenParam", host(url)));
+            Ok(v) => match from_hex(v.as_str().unwrap_or("")) {
+                Ok(bytes) if bytes.len() >= 32 => {
+                    let mut r = [0u8; 32];
+                    r.copy_from_slice(&bytes[..32]);
+                    r
                 }
-                let mut r = [0u8; 32];
-                r.copy_from_slice(&bytes[..32]);
-                r
-            }
-            Err(e) if e.message.to_ascii_lowercase().contains("revert") || e.data.is_some() => [0u8; 32],
+                _ => continue,
+            },
+            Err(e) if e.message.to_ascii_lowercase().contains("revert") => [0u8; 32],
             Err(_) => continue,
         };
         got.push((url.clone(), root));
     }
     if got.len() < need {
-        return Err(format!("fewer than two endpoints answered at block {block}"));
+        return Err(format!("fewer than {need} endpoints answered at block {block}"));
     }
     if got.iter().any(|g| g.1 != got[0].1) {
         let who: Vec<String> = got.iter().map(|(u, r)| format!("{} {}", host(u), &to_hex(r)[..14])).collect();
@@ -169,10 +169,21 @@ fn param(eps: &[(Rpc, String)], project: &Project, key: &str, block: u64, need: 
     Ok((got[0].1, got.into_iter().map(|(u, _)| host(&u)).collect()))
 }
 
-/// The endpoint a BAMFS read uses: the reader's own, or the last public one (the one the viewer's tests use).
-pub fn bamfs_rpc(project: &Project, own: Option<&str>) -> Result<Rpc> {
-    let url = own.or_else(|| public_rpcs(project.chain.id).last().copied()).ok_or_else(|| format!("no endpoint for {}", project.chain.name))?;
-    Rpc::new(url, 4)
+/// A BAMFS tree read through the reader's own endpoint, or each public one in turn until one gets through.
+/// Every byte is checked to `root`, so any endpoint will do; trying the others only keeps one from blocking it.
+pub fn bamfs_read(project: &Project, own: Option<&str>, root: &H256, max_bytes: usize) -> Result<crate::bamfs::Tree> {
+    let urls: Vec<&str> = match own {
+        Some(u) => vec![u],
+        None => public_rpcs(project.chain.id).iter().rev().copied().collect(),
+    };
+    let mut last = format!("no endpoint for {}", project.chain.name);
+    for url in urls {
+        match Rpc::new(url, 4).and_then(|rpc| crate::bamfs::read(&rpc, root, max_bytes)) {
+            Ok(t) => return Ok(t),
+            Err(e) => last = format!("{}: {e}", host(url)),
+        }
+    }
+    Err(last)
 }
 
 /// The project's current root: its ABX FS root, or its BAMFS root when it has none.
@@ -183,10 +194,10 @@ pub fn current_root(project: &Project, own: Option<&str>) -> Result<Current> {
     if root != [0u8; 32] {
         return Ok(Current { root, store: Store::AbxFs, block, sources });
     }
-    if let Ok((older, src)) = param(&eps, project, KEY_BAMFS, block, need) {
-        if older != [0u8; 32] {
-            return Ok(Current { root: older, store: Store::Bamfs, block, sources: src });
-        }
+    // "Nothing published" needs the same agreement for the older key: a failure there is a failure, not absence.
+    let (older, src) = param(&eps, project, KEY_BAMFS, block, need).map_err(|e| format!("its BAMFS root: {e}"))?;
+    if older != [0u8; 32] {
+        return Ok(Current { root: older, store: Store::Bamfs, block, sources: src });
     }
     Ok(Current { root, store: Store::AbxFs, block, sources })
 }

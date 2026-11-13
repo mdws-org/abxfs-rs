@@ -12,9 +12,10 @@
 //!
 //! This follows the from-chain viewer's `site/bamfs.js` rule for rule, so the two can be compared on the same roots.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use serde_json::json;
 
@@ -43,7 +44,8 @@ pub struct File {
     /// Path under the root, '/'-separated; "" when the root is a file.
     pub path: String,
     pub mime: String,
-    pub content: Vec<u8>,
+    /// Shared between paths that name the same file.
+    pub content: Arc<Vec<u8>>,
 }
 
 /// Everything under a BAMFS root that can be opened. Entries whose names cannot be a path part are listed in
@@ -54,6 +56,8 @@ pub struct Tree {
     pub dirs: Vec<String>,
     pub files: Vec<File>,
     pub unusable: Vec<String>,
+    /// Bytes of distinct file contents held.
+    pub bytes: usize,
 }
 
 fn h(parts: &[&[u8]]) -> H256 {
@@ -96,7 +100,9 @@ impl Abi<'_> {
         if w[..26].iter().any(|&b| b != 0) {
             return Err("a number in a reply is too large".into());
         }
-        Ok(w[26..].iter().fold(0usize, |v, &b| (v << 8) | b as usize))
+        let v = w[26..].iter().fold(0u64, |v, &b| (v << 8) | b as u64);
+        // A number past the address space cannot point inside a reply held in memory.
+        usize::try_from(v).ok().filter(|v| v.checked_add(1 << 20).is_some()).ok_or_else(|| "a reply is shorter than its contents".to_string())
     }
     fn h256(&self, at: usize) -> Result<H256> {
         self.need(at, 32)?;
@@ -118,7 +124,9 @@ impl Abi<'_> {
     }
 }
 
+/// UTF-8 as the browser's TextDecoder reads it: strictly, with a leading byte-order mark dropped.
 fn utf8(b: &[u8], what: &str) -> Result<String> {
+    let b = b.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(b);
     String::from_utf8(b.to_vec()).map_err(|_| format!("{what} is not UTF-8"))
 }
 
@@ -150,10 +158,10 @@ struct Info {
 /* ── second generation ── */
 
 fn node(ctx: &Ctx, store: &str, id: &H256, prefix: u8, seen: &mut usize) -> Result<Vec<u8>> {
-    *seen += 1;
     if *seen > MAX_NODES {
         return Err(format!("it has more than {MAX_NODES} nodes"));
     }
+    *seen += 1;
     let reply = ctx.eth(store, "getNode(bytes32)", id)?;
     let r = Abi(&reply);
     let blob = r.bytes(r.uint(0)?)?.to_vec();
@@ -387,12 +395,17 @@ pub fn inflate(d: &[u8], limit: usize) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// One gzip member and nothing after it, as the browser's DecompressionStream('gzip') accepts.
 fn gunzip(stored: &[u8], limit: usize) -> Result<Vec<u8>> {
+    let bad = || "the stored bytes are not a valid gzip stream".to_string();
     let mut out = Vec::new();
-    let mut d = flate2::read::GzDecoder::new(stored).take(limit as u64 + 1);
-    d.read_to_end(&mut out).map_err(|_| "the stored bytes are not a valid gzip stream".to_string())?;
+    let mut d = flate2::bufread::GzDecoder::new(stored);
+    (&mut d).take(limit as u64 + 1).read_to_end(&mut out).map_err(|_| bad())?;
     if out.len() > limit {
         return Err(format!("it decodes to more than {} MiB", MAX_FILE_BYTES / 1048576));
+    }
+    if !d.into_inner().is_empty() {
+        return Err(bad());
     }
     Ok(out)
 }
@@ -405,7 +418,9 @@ fn decode(algorithm: u8, bytes: &[u8], limit: usize) -> Result<Vec<u8>> {
     }
 }
 
-fn read_file(ctx: &Ctx, cid: &H256, info: &Info) -> Result<Vec<u8>> {
+/// A file's bytes, with a read budget of its own (as the viewer gives each file).
+fn read_file(walk: &Ctx, cid: &H256, info: &Info) -> Result<Vec<u8>> {
+    let ctx = &Ctx { rpc: walk.rpc, block: walk.block.clone(), calls: AtomicU64::new(0) };
     let list = if info.generation == 2 { chunks2(ctx, info)? } else { info.chunks.clone() };
     if list.len() > MAX_CHUNKS {
         return Err(format!("the file has more than {MAX_CHUNKS} chunks"));
@@ -465,8 +480,9 @@ fn exists(ctx: &Ctx, store: &str, sig: &str, cid: &H256) -> Result<bool> {
     Abi(&reply).bool(0)
 }
 
-/// Every file under a BAMFS root, each checked back to it, read at one block.
-pub fn read(rpc: &Rpc, root: &H256) -> Result<Tree> {
+/// Every file under a BAMFS root, each checked back to it, read at one block, with no more than `max_bytes` of
+/// distinct file contents.
+pub fn read(rpc: &Rpc, root: &H256, max_bytes: usize) -> Result<Tree> {
     let block = rpc.call("eth_blockNumber", json!([]))?.map_err(|e| e.to_string())?;
     let ctx = Ctx { rpc, block: block.as_str().ok_or("no block number")?.to_string(), calls: AtomicU64::new(0) };
     let mut top: Option<(u8, bool)> = None;
@@ -481,51 +497,83 @@ pub fn read(rpc: &Rpc, root: &H256) -> Result<Tree> {
         }
     }
     let (generation, is_dir) = top.ok_or("no BAMFS store holds this root")?;
-    let info = |cid: &H256| if generation == 2 { info2(&ctx, cid) } else { info1(&ctx, cid) };
-    let mut tree = Tree { is_file: !is_dir, generation, dirs: Vec::new(), files: Vec::new(), unusable: Vec::new() };
+    let tree = Tree { is_file: !is_dir, generation, dirs: Vec::new(), files: Vec::new(), unusable: Vec::new(), bytes: 0 };
     if !is_dir {
-        let i = info(root)?;
+        let mut tree = tree;
+        let i = if generation == 2 { info2(&ctx, root)? } else { info1(&ctx, root)? };
         let content = read_file(&ctx, root, &i)?;
-        tree.files.push(File { path: String::new(), mime: i.mime, content });
+        if content.len() > max_bytes {
+            return Err(format!("it holds more than {} MiB", max_bytes / 1048576));
+        }
+        tree.bytes = content.len();
+        tree.files.push(File { path: String::new(), mime: i.mime, content: Arc::new(content) });
         return Ok(tree);
     }
-    let mut seen = 0usize;
-    let mut stack: Vec<(H256, String, usize)> = vec![(*root, String::new(), 0)];
-    let mut visited: HashSet<H256> = HashSet::new();
-    let mut count = 0usize;
-    while let Some((cid, prefix, depth)) = stack.pop() {
+    let mut walk = Walk { ctx: &ctx, generation, seen: 0, count: 0, path: HashSet::new(), tree, contents: HashMap::new(), max_bytes };
+    walk.descend(root, "", 0)?;
+    Ok(walk.tree)
+}
+
+struct Walk<'a> {
+    ctx: &'a Ctx<'a>,
+    generation: u8,
+    seen: usize,
+    count: usize,
+    /// Directories on the path from the root to the one being listed: one of them again is a loop. The same
+    /// directory in two places is not.
+    path: HashSet<H256>,
+    tree: Tree,
+    /// Each file read once, however many paths name it.
+    contents: HashMap<H256, Arc<Vec<u8>>>,
+    max_bytes: usize,
+}
+
+impl Walk<'_> {
+    fn descend(&mut self, cid: &H256, prefix: &str, depth: usize) -> Result<()> {
         if depth > MAX_DEPTH {
             return Err(format!("directories are nested more than {MAX_DEPTH} deep"));
         }
-        if !visited.insert(cid) {
-            return Err(format!("directory {} is inside itself", to_hex(&cid)));
+        if !self.path.insert(*cid) {
+            return Err(format!("directory {} is inside itself", to_hex(cid)));
         }
-        let entries = if generation == 2 { list2(&ctx, &cid, &mut seen)? } else { list1(&ctx, &cid)? };
+        let entries = if self.generation == 2 { list2(self.ctx, cid, &mut self.seen)? } else { list1(self.ctx, cid)? };
         let mut names = HashSet::new();
         for e in entries {
             if !names.insert(e.name.clone()) {
-                return Err(format!("two entries in {} are named {}", if prefix.is_empty() { "the root" } else { &prefix }, e.name));
+                return Err(format!("two entries in {} are named {}", if prefix.is_empty() { "the root" } else { prefix }, e.name));
             }
-            count += 1;
-            if count > MAX_ENTRIES {
+            if self.count >= MAX_ENTRIES {
                 return Err(format!("it has more than {MAX_ENTRIES} entries"));
             }
+            self.count += 1;
             if !usable(&e.name) {
-                tree.unusable.push(format!("{prefix}{}", e.name));
+                self.tree.unusable.push(format!("{prefix}{}", e.name));
                 continue;
             }
             if e.is_dir {
                 let p = format!("{prefix}{}/", e.name);
-                tree.dirs.push(p.trim_end_matches('/').to_string());
-                stack.push((e.cid, p, depth + 1));
+                self.tree.dirs.push(p.trim_end_matches('/').to_string());
+                self.descend(&e.cid, &p, depth + 1)?;
             } else {
-                let i = info(&e.cid)?;
-                let content = read_file(&ctx, &e.cid, &i)?;
-                tree.files.push(File { path: format!("{prefix}{}", e.name), mime: i.mime, content });
+                let i = if self.generation == 2 { info2(self.ctx, &e.cid)? } else { info1(self.ctx, &e.cid)? };
+                let content = match self.contents.get(&e.cid) {
+                    Some(c) => Arc::clone(c),
+                    None => {
+                        let c = Arc::new(read_file(self.ctx, &e.cid, &i)?);
+                        self.tree.bytes += c.len();
+                        if self.tree.bytes > self.max_bytes {
+                            return Err(format!("it holds more than {} MiB", self.max_bytes / 1048576));
+                        }
+                        self.contents.insert(e.cid, Arc::clone(&c));
+                        c
+                    }
+                };
+                self.tree.files.push(File { path: format!("{prefix}{}", e.name), mime: i.mime, content });
             }
         }
+        self.path.remove(cid);
+        Ok(())
     }
-    Ok(tree)
 }
 
 #[cfg(test)]
@@ -542,6 +590,25 @@ mod tests {
         assert!(inflate(&[0, 0x61, 0x20, 0x05], 100).is_err());
         assert!(inflate(&[0, 0x61, 0x20, 0x00], 3).is_err());
         assert_eq!(inflate(&[], 100).unwrap(), b"");
+    }
+
+    #[test]
+    fn gzip_is_one_member_and_nothing_after() {
+        use std::io::Write;
+        let mut g = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        g.write_all(b"hello").unwrap();
+        let one = g.finish().unwrap();
+        assert_eq!(gunzip(&one, 100).unwrap(), b"hello");
+        assert!(gunzip(&[one.as_slice(), b"x"].concat(), 100).is_err());
+        assert!(gunzip(&[one.as_slice(), one.as_slice()].concat(), 100).is_err());
+        assert!(gunzip(&one, 4).is_err());
+    }
+
+    #[test]
+    fn text_drops_a_leading_bom() {
+        assert_eq!(utf8(b"\xef\xbb\xbfa", "x").unwrap(), "a");
+        assert_eq!(utf8(b"a\xef\xbb\xbf", "x").unwrap(), "a\u{feff}");
+        assert!(utf8(b"\xff", "x").is_err());
     }
 
     #[test]
