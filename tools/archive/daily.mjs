@@ -22,7 +22,6 @@ const ONLY = process.argv.includes('--only') ? process.argv[process.argv.indexOf
 const BIN = new URL('../../target/release/abxfs-rs', import.meta.url).pathname;
 const CONTRACTS = 'https://abx.thebenmeadows.com/contracts.json';
 const TOPIC = '0xde0436cfd14f6250e38daf8e3605d7a54612abb0d9a1ac04278609edb949cd78';
-const BLOCKSCOUT = { 1: 'https://eth.blockscout.com/api', 8453: 'https://base.blockscout.com/api', 42161: 'https://arbitrum.blockscout.com/api' };
 const RPCS = { 1: CHAINS.ethereum.rpcs, 8453: CHAINS.base.rpcs, 42161: CHAINS['arbitrum-one'].rpcs };
 const KEY_OF = Object.fromEntries(Object.entries(KEYS).map(([k, v]) => ['0x' + v, k]));
 const MAX_TOKENS = 1200;
@@ -38,17 +37,25 @@ async function post(url, body, ms = 20_000) {
 // The root every token of a collection holds now, under both keys, where two endpoints agree at one block.
 async function currentRoots(c) {
   const rpcs = RPCS[c.chainId];
-  const heights = (await Promise.allSettled(rpcs.map(async (u) => [u, parseInt((await post(u, { jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })).result, 16)])))
-    .filter((x) => x.status === 'fulfilled' && Number.isFinite(x.value[1])).map((x) => x.value);
+  let heights = [];
+  for (let attempt = 0; attempt < 4 && heights.length < 2; attempt++) {
+    if (attempt) await sleep(3000 * attempt);
+    heights = (await Promise.allSettled(rpcs.map(async (u) => [u, parseInt((await post(u, { jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })).result, 16)])))
+      .filter((x) => x.status === 'fulfilled' && Number.isFinite(x.value[1])).map((x) => x.value);
+  }
   if (heights.length < 2) throw new Error(`fewer than two endpoints answer for chain ${c.chainId}`);
   const block = Math.min(...heights.map((h) => h[1])) - 3;
   const n = Math.min(Math.max((c.sale?.minted ?? 0) + 2, 3), MAX_TOKENS);
   const out = [];
   for (const [key, k] of Object.entries(KEYS)) {
-    for (let s = 0; s < n; s += 50) {
-      const toks = Array.from({ length: Math.min(50, n - s) }, (_, i) => s + i);
+    for (let s = 0; s < n; s += 20) {
+      const toks = Array.from({ length: Math.min(20, n - s) }, (_, i) => s + i);
       const calls = toks.map((t, i) => ({ jsonrpc: '2.0', id: i, method: 'eth_call', params: [{ to: c.address, data: '0x6bd39222' + word(t) + k }, '0x' + block.toString(16)] }));
-      const answers = (await Promise.allSettled(heights.map(([u]) => post(u, calls, 30_000)))).filter((x) => x.status === 'fulfilled' && Array.isArray(x.value)).map((x) => x.value);
+      let answers = [];
+      for (let attempt = 0; attempt < 4 && answers.length < 2; attempt++) {
+        if (attempt) await sleep(3000 * attempt);
+        answers = (await Promise.allSettled(heights.map(([u]) => post(u, calls, 30_000)))).filter((x) => x.status === 'fulfilled' && Array.isArray(x.value) && x.value.every((r) => r.result !== undefined || r.error)).map((x) => x.value);
+      }
       if (answers.length < 2) throw new Error(`fewer than two endpoints answered for ${c.address}`);
       toks.forEach((t, i) => {
         const got = answers.map((a) => a.find((r) => r.id === i)).map((r) => (r?.result ? r.result.slice(0, 66).toLowerCase() : r?.error && /revert/i.test(r.error.message || '') ? '0x' + '0'.repeat(64) : null)).filter(Boolean);
@@ -61,27 +68,60 @@ async function currentRoots(c) {
   return out;
 }
 
-// Every parameter-change log of the collections on one chain since `from`, from Blockscout.
-async function loggedRoots(chainId, addresses, from) {
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+// Public endpoints that serve old logs for a list of addresses, and the widest span each allows (measured 2026-11-13;
+// Ethereum's free endpoints refuse logs that old, so its logs come from Blockscout's v2 API, address by address).
+const LOG_RPCS = { 8453: ['https://base-rpc.publicnode.com', 50_000], 42161: ['https://arb1.arbitrum.io/rpc', 100_000] };
+const BLOCKSCOUT_V2 = 'https://eth.blockscout.com/api/v2';
+
+function decodeLog(l) {
+  const key = KEY_OF[l.topics?.[2]?.toLowerCase()];
+  const root = '0x' + (l.data || '').replace(/^0x/, '').slice(0, 64).toLowerCase();
+  if (!key || root.length !== 66 || /^0x0+$/.test(root)) return null;
+  return { org: (l.address?.hash || l.address).toLowerCase(), token: BigInt(l.topics[1]).toString(), key, root, block: Number(l.block_number ?? parseInt(l.blockNumber, 16)), tx: (l.transaction_hash || l.transactionHash).toLowerCase() };
+}
+
+// The parameter-change logs of `addresses` (address -> first block not yet read) on one chain, up to `head`.
+async function loggedRoots(chainId, addresses, head) {
   const out = [];
-  let to = null;
-  for (let page = 1; page <= 100; page++) {
-    const q = new URLSearchParams({ module: 'logs', action: 'getLogs', fromBlock: String(from), toBlock: 'latest', topic0: TOPIC, page: String(page), offset: '1000' });
-    const r = await fetch(`${BLOCKSCOUT[chainId]}?${q}`, { signal: AbortSignal.timeout(60_000) }).then((x) => x.json());
-    if (!Array.isArray(r.result)) { if (/No records/i.test(r.message || '')) break; throw new Error(`Blockscout (chain ${chainId}): ${r.message || 'no result'}`); }
-    for (const l of r.result) {
-      const block = parseInt(l.blockNumber, 16);
-      to = Math.max(to ?? 0, block);
-      if (!addresses.has(l.address.toLowerCase())) continue;
-      const key = KEY_OF[l.topics[2]?.toLowerCase()];
-      if (!key) continue;
-      const root = '0x' + l.data.slice(2, 66).toLowerCase();
-      if (/^0x0+$/.test(root)) continue;
-      out.push({ org: l.address.toLowerCase(), token: BigInt(l.topics[1]).toString(), key, root, block, tx: l.transactionHash.toLowerCase() });
+  if (chainId === 1) {
+    for (const a of Object.keys(addresses)) {
+      let params = '';
+      for (let page = 0; page < 50; page++) {
+        const r = await fetch(`${BLOCKSCOUT_V2}/addresses/${a}/logs${params}`, { signal: AbortSignal.timeout(30_000) });
+        if (!r.ok) throw new Error(`Blockscout answered ${r.status} for ${a}`);
+        const j = await r.json();
+        for (const l of j.items || []) {
+          if ((l.topics?.[0] || '').toLowerCase() !== TOPIC || Number(l.block_number) < addresses[a]) continue;
+          const d = decodeLog({ ...l, address: a });
+          if (d) out.push(d);
+        }
+        if (!j.next_page_params) break;
+        params = '?' + new URLSearchParams(j.next_page_params);
+        await sleep(400);
+      }
     }
-    if (r.result.length < 1000) break;
+    return out;
   }
-  return { logs: out, through: to };
+  const [url, widest] = LOG_RPCS[chainId];
+  const list = Object.entries(addresses).sort((x, y) => x[1] - y[1]);
+  for (let g = 0; g < list.length; g += 10) {
+    const group = list.slice(g, g + 10);
+    let from = group[0][1], span = widest;
+    while (from <= head) {
+      const to = Math.min(head, from + span - 1);
+      let r;
+      try { r = await post(url, { jsonrpc: '2.0', id: 1, method: 'eth_getLogs', params: [{ address: group.map((x) => x[0]), topics: [TOPIC], fromBlock: '0x' + from.toString(16), toBlock: '0x' + to.toString(16) }] }, 60_000); } catch (e) { r = { error: { message: e.message } }; }
+      if (r.error) {
+        if (span > 1_000) { span = Math.floor(span / 2); continue; }
+        throw new Error(`logs of chain ${chainId} at ${from}: ${(r.error.message || '').slice(0, 120)}`);
+      }
+      for (const l of r.result) { const d = decodeLog(l); if (d && d.block >= addresses[d.org]) out.push(d); }
+      from = to + 1;
+      await sleep(150);
+    }
+  }
+  return out;
 }
 
 function load() {
@@ -144,18 +184,18 @@ async function main() {
       }
     } catch (e) { failed.push(`${c.chainId} ${c.address}: ${e.message}`); }
   }
-  // Versions ever emitted.
+  // Versions ever emitted: each collection's logs from the block after the last one read (its deploy block at first).
   for (const chain of [1, 8453, 42161]) {
     const mine = contracts.filter((c) => c.chainId === chain);
     if (!mine.length) continue;
-    const from = state.logsFrom[chain] ?? Math.min(...mine.map((c) => c.block));
     try {
-      const { logs, through } = await loggedRoots(chain, new Set(mine.map((c) => c.address.toLowerCase())), from);
-      for (const l of logs) {
+      const head = Math.min(...(await Promise.all(RPCS[chain].slice(0, 1).map(async (u) => parseInt((await post(u, { jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })).result, 16))))) - 3;
+      const addresses = Object.fromEntries(mine.map((c) => [c.address.toLowerCase(), state.logsFrom[`${chain}:${c.address.toLowerCase()}`] ?? c.block]));
+      for (const l of await loggedRoots(chain, addresses, head)) {
         const v = note(chain, l.org, l.token, l.key, l.root, { block: l.block, date: null });
         v.log ||= { block: l.block, tx: l.tx };
       }
-      if (through && !ONLY) state.logsFrom[chain] = through + 1;
+      for (const a of Object.keys(addresses)) state.logsFrom[`${chain}:${a}`] = head + 1;
     } catch (e) { failed.push(`logs of chain ${chain}: ${e.message}`); }
   }
   save(state);
@@ -176,7 +216,16 @@ async function main() {
       if (!lacking.length) continue;
       try {
         fin ||= await finalized();
-        const { root, proof } = await prove({ chain, org, token, key, kind, fin });
+        let got;
+        for (let attempt = 0; ; attempt++) {
+          try { got = await prove({ chain, org, token, key, kind, fin }); break; } catch (e) {
+            if (/does not exist at that block|does not exist$/.test(e.message)) { got = null; break; }
+            if (attempt >= 1) throw e;
+            await sleep(10_000);
+          }
+        }
+        if (!got) continue;
+        const { root, proof } = got;
         const v = lacking.find((x) => x.root === root);
         if (!v) continue;
         const b = bundle(v, KIND_NAME[kind], proof);

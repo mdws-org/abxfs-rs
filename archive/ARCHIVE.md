@@ -107,7 +107,7 @@ Read against a state root: the account proof gives the account (or its absence),
 
 ## 4. Token parameter
 
-Every ABX collection is a 45-byte minimal proxy to the one implementation `0x785cd3f74e86e4495c178b5ffcd047c57e699270`, so its storage layout is fixed. Its code hash is
+Every ABX collection is a 44-byte minimal proxy to the one implementation `0x785cd3f74e86e4495c178b5ffcd047c57e699270`, so its storage layout is fixed. Its code hash is
 
 ```
 COLLECTION_CODE_HASH = H( 3d3d3d3d363d3d37363d73 ‖ 785cd3f74e86e4495c178b5ffcd047c57e699270 ‖ 5af43d3d93803e602a57fd5bf3 )
@@ -125,7 +125,7 @@ FLAGS_SLOT = VALUE_SLOT + 1  (as a 256-bit integer)
 
 For token 0 and `abxfs.cid` this gives `VALUE_SLOT = 0xcf53182b08e96a80a3594b8136d4fd6393838c5f6f5d0679d5178dcb9e2abb6a`.
 
-The parameter rule, given a state root and the account evidence for the project's `org` (class `param` unless a proof itself fails):
+The parameter rule, given a state root and the account evidence for the project's `org`, checked in this order (class `param`, except that a missing account or word is class `proof` as section 3.4 says):
 
 - The account exists and its code hash is `COLLECTION_CODE_HASH`.
 - `flags = word(org, FLAGS_SLOT)`: no bit above bit 15 is set; bit 8 (is set) is 1; bit 0 (value is a hash) is 0.
@@ -269,15 +269,15 @@ The branch counts are covered by the node ids and are not checked.
   "chunks": { "<32-byte hex id>": <byte string>, ... } }
 ```
 
-`BACKEND = 0x91520cdaaab44267e99d08fea7730d7a7c60e9c2`. Lists, reachability and duplicates as in section 7. Failures are class `content`.
+`BACKEND = 0x91520cdaaab44267e99d08fea7730d7a7c60e9c2`. Lists, reachability and duplicates as in section 7. A root of all zeros is not special here, unlike section 7: it names a node like any other id, so a directory or file whose root is zero cannot be read and is a failure. Failures are class `content`.
 
 **Directory**: `cid == H(0x12 ‖ root)`. Walk nodes from `root`: `H(0x22 ‖ blob) == id`, level byte 0 to 3, each child one level below its parent; a branch is `level ‖ u16(n) ‖ n × ( id:32 ‖ 4 more bytes )`, `2 ≤ n ≤ 128`, length exactly `3 + 36·n`; a leaf is as in section 7 (same layout of offsets and records). Entries, duplicates and loops as in section 7.
 
 **File**: `mime` is valid UTF-8; `cid == H( 0x11 ‖ root ‖ H(mime) ‖ u8(compression) ‖ outputHash )`.
 
 - `compression` not 0: the file's bytes are `content`, and `H(content) == outputHash`.
-- `compression` 0: `outputHash` is zero. Walk from `root`: `H(0x21 ‖ blob) == id`, a branch is `level ‖ u16(n) ‖ n × ( id:32 ‖ 10 more bytes )`, length exactly `3 + 42·n`; a leaf is `0x00 ‖ m × ( id:32 ‖ u16 size )`, `m ≥ 1`, length exactly `1 + 34·m`. The bytes are the chunks in order; each chunk `chunks[id]` satisfies `H(BACKEND ‖ chunk) == id` and its length equals the leaf's `size`.
-- Either way the file's length equals `size`.
+- `compression` 0: `outputHash` is zero. Walk from `root`: `H(0x21 ‖ blob) == id`, level byte 0 to 3, each child one level below its parent; a branch is `level ‖ u16(n) ‖ n × ( id:32 ‖ 10 more bytes )`, `2 ≤ n ≤ 128`, length exactly `3 + 42·n`; a leaf is `0x00 ‖ m × ( id:32 ‖ u16 size )`, `m ≥ 1`, length exactly `1 + 34·m`. The bytes are the chunks in order; each chunk `chunks[id]` satisfies `H(BACKEND ‖ chunk) == id` and its length equals the leaf's `size`.
+- `size` is the number of bytes the store holds for the file: its length when `compression` is 0, which must equal `size`; its compressed length otherwise, which the bundle does not carry and the verifier does not check. `size` is not part of the CID.
 
 ## 9. Content: BAMFS first generation (`bamfs1`)
 
@@ -288,7 +288,7 @@ The branch counts are covered by the node ids and are not checked.
   "chunks": { "<32-byte hex id>": <byte string>, ... } }
 ```
 
-Failures are class `content`.
+Lists, reachability and duplicates as in section 7. Failures are class `content`.
 
 **Directory**: `entryHash_i = H( H(name_i) ‖ cid_i ‖ u8(isDir_i) )`; `cid == H( 0x02 ‖ H(entryHash_0 ‖ … ‖ entryHash_{n-1}) )` (for no entries, `H` of the empty string). Duplicates and loops as in section 7.
 
@@ -309,7 +309,7 @@ A verifier that accepts a bundle writes exactly this to standard output and exit
 abx-archive/1
 project <chain> <org> <token> <key>
 root <root>
-anchor <number> <hash>                     (absent for agreed)
+anchor <number> <hash>                     (absent for agreed and logged)
 l2 <number> <hash> <final|claimed|confirmed>   (base and arbitrum only)
 not proved agreed <block> <endpoint>,<endpoint>…   (agreed only, in the bundle's order)
 not proved logged <block> <tx>                     (logged only)
@@ -318,11 +318,11 @@ store <store>
 end <files> <bytes>
 ```
 
-Lines end with a single line feed. Each directory line is `d <path>/`; each file line is `f <path> <length> <sha256 hex of its bytes>`. A path is the names from the root joined with `/`, each name's bytes percent-encoded: a byte is written as itself when it is one of `A`-`Z`, `a`-`z`, `0`-`9`, `-`, `.`, `_`, `~`, and as `%` and two uppercase hex digits otherwise (after the BOM rule of section 10 for BAMFS). Lines are sorted by the bytes of the path as printed, a directory's with its trailing `/`; the root directory itself has no line. When the root is a file, the one line is `f  <length> <sha256>` (an empty path). `end` counts file lines and their total bytes.
+Lines end with a single line feed. Each directory line is `d <path>/`; each file line is `f <path> <length> <sha256>`, where `<sha256>` is the SHA-256 of the file's bytes as 64 lowercase hex digits with no `0x` (the one place hex has no prefix). A path is the names from the root joined with `/`, each name's bytes percent-encoded: a byte is written as itself when it is one of `A`-`Z`, `a`-`z`, `0`-`9`, `-`, `.`, `_`, `~`, and as `%` and two uppercase hex digits otherwise (after the BOM rule of section 10 for BAMFS). Lines are sorted by the bytes of the path as printed, a directory's with its trailing `/`; the root directory itself has no line. When the root is a file, the one line is `f  <length> <sha256>` (an empty path). `end` counts file lines and their total bytes.
 
 A verifier that rejects writes one line, `reject <class> <message>`, and exits with status 1. The classes are `container`, `index`, `proof`, `binding`, `param` and `content`, checked in this order: container, index, the binding proof (proof, binding, param), then content. Messages are free text. Any other failure (unreadable file, out of memory) exits with status 2.
 
-When a verifier is also given an output directory, it writes each file under it at its path, with the names percent-decoded, and refuses a bundle with a name that is empty, `.`, `..`, or holds `/` or a zero byte.
+When a verifier is also given an output directory, it writes each file under it at its path, with the names percent-decoded (a root that is a file is written as `DIR/file`), and refuses a bundle with a name that is empty, `.`, `..`, or holds `/` or a zero byte.
 
 ## 12. Limits
 

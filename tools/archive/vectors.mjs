@@ -173,7 +173,8 @@ function bamfs2() {
       root = tree(0x21, leaves, 10);
     }
     const cid = K(Uint8Array.of(0x11), root, K(m), Uint8Array.of(compression), oh);
-    st.files.push({ cid: hex(cid), root: hex(root), mime: bstr(m, st.blocks), compression, outputHash: hex(oh), size: body.length, ...f });
+    // For a compressed file the store records its compressed length; this stands in for that with half the length.
+    st.files.push({ cid: hex(cid), root: hex(root), mime: bstr(m, st.blocks), compression, outputHash: hex(oh), size: compression ? Math.ceil(body.length / 2) : body.length, ...f });
     return cid;
   };
   st.dir = (entries, { perLeaf = 2 } = {}) => {
@@ -326,6 +327,15 @@ reject('bad-container-version', 'container', rebuild(tree.index, tree.blocks, { 
   const f = s.file(enc.encode('y'));
   const root = s.dir([{ name: enc.encode('a'), cid: f }, { name: cat(Uint8Array.of(0xef, 0xbb, 0xbf), enc.encode('a')), cid: f }]);
   reject('bad-content-bom-duplicate', 'content', car({ format: 'abx-archive/1', project: PROJECT('bamfs.cid'), root: hex(root), proof: AGREED, content: s.content() }, s.blocks));
+}
+{
+  // BAMFS second generation: a directory whose root is all zeros is not an empty directory; it names a node that
+  // cannot be found.
+  const s = bamfs2();
+  const empty = K(Uint8Array.of(0x12), Z32);
+  const root = s.dir([{ name: enc.encode('hollow'), cid: empty, dir: true }]);
+  s.dirs.push({ cid: hex(empty), root: hex(Z32) });
+  reject('bad-content-bamfs2-zero-root', 'content', car({ format: 'abx-archive/1', project: PROJECT('bamfs.cid'), root: hex(root), proof: AGREED, content: s.content() }, s.blocks));
 }
 {
   const s = bamfs1();

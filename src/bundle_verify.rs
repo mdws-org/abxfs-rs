@@ -315,7 +315,9 @@ pub fn param_slots(token: &H256, key: &str) -> (H256, H256) {
 }
 
 fn param_rule(acc: &Accounts, org: &[u8; 20], token: &H256, key: &str, root: &H256) -> R<()> {
-    if acc.code_hash(org).map_err(|e| Reject { class: "param", message: e.message })? != collection_code_hash() {
+    // An account the proofs show absent fails the rule (param); an account with no evidence at all is a proof gap.
+    let code = acc.code_hash(org).map_err(|e| Reject { class: if e.class == "binding" { "param" } else { e.class }, message: e.message })?;
+    if code != collection_code_hash() {
         return fail("param", "the project's contract is not an ABX collection");
     }
     let (vs, fs) = param_slots(token, key);
@@ -885,7 +887,7 @@ impl<'a> Content<'a> {
             }
             body
         };
-        if body.len() as u64 != size {
+        if comp == 0 && body.len() as u64 != size {
             return fail("content", format!("file {} is {} bytes, its record says {size}", h(cid), body.len()));
         }
         self.add_total(body.len())?;

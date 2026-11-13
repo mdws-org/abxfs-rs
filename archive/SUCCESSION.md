@@ -25,7 +25,7 @@ This note is for anyone who finds the ABX archive with nobody left to run it. It
 
 ## Keep the archive going
 
-The daily run needs a machine with Node 22 and a Rust toolchain, and an IPFS node to pin into. It uses only public JSON-RPC endpoints, Ethereum consensus endpoints, and Blockscout's public API.
+The daily run needs a machine with Node 22 and a Rust toolchain, and an IPFS node to pin into. It uses only public JSON-RPC endpoints, Ethereum consensus endpoints, and Blockscout's public API (for the logs of Ethereum collections).
 
 1. Clone this repository and build the reader: `cargo build --release --locked`.
 2. Run `node tools/archive/daily.mjs <state dir>` once a day. It finds new versions, makes the bundles they lack, and writes `<state dir>/manifest.json`. Keep `<state dir>` between runs: `state.json` remembers what is done.

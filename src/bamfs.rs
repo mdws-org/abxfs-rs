@@ -502,8 +502,11 @@ fn read_file(walk: &Ctx, cid: &H256, info: &Info) -> Result<Vec<u8>> {
         }
         body
     };
-    if info.generation == 2 && body.len() != info.size {
-        return Err(format!("file {} is {} bytes, its record says {}", to_hex(cid), body.len(), info.size));
+    // A second-generation record's size counts the bytes stored: the file's length when it is not compressed, and
+    // the compressed length (all chunks together) when it is.
+    let kept = if info.compression != 0 { total } else { body.len() };
+    if info.generation == 2 && kept != info.size {
+        return Err(format!("file {} stores {kept} bytes, its record says {}", to_hex(cid), info.size));
     }
     Ok(body)
 }
