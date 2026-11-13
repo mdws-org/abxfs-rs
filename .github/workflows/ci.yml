@@ -64,6 +64,8 @@ jobs:
         run: node oracle/make-corpus.mjs oracle/corpus-edge
       - name: Build the Rust reader and run its tests
         run: cargo build --release --locked && cargo test --release --locked
+      - name: Every archive test vector gives the output its .out file names (archive/ARCHIVE.md section 14)
+        run: tools/archive/check-vectors.sh ./target/release/abxfs-rs verify-bundle
       - name: Read a Robinhood Chain project's root and compare it with the plan of what was read
         run: |
           set -e

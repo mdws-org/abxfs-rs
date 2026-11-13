@@ -366,6 +366,7 @@ pub struct Binding {
     pub anchor: Option<(u64, H256)>,
     pub l2: Option<(u64, H256, &'static str)>,
     pub agreed: Option<(u64, Vec<String>)>,
+    pub logged: Option<(u64, H256)>,
 }
 
 struct Project {
@@ -378,7 +379,7 @@ struct Project {
 
 fn binding(ix: &Ix, p: &Project, root: &H256, v: &Value) -> R<Binding> {
     let kind = v.get("kind").and_then(Value::as_str).unwrap_or("");
-    let fits = matches!((kind, p.chain), ("ethereum", 1) | ("base", 8453) | ("arbitrum", 42161) | ("agreed", 1 | 8453 | 42161));
+    let fits = matches!((kind, p.chain), ("ethereum", 1) | ("base", 8453) | ("arbitrum", 42161) | ("agreed" | "logged", 1 | 8453 | 42161));
     if !fits {
         return fail("index", format!("a proof of kind {kind:?} does not fit chain {}", p.chain));
     }
@@ -389,7 +390,7 @@ fn binding(ix: &Ix, p: &Project, root: &H256, v: &Value) -> R<Binding> {
             let hd = header_of(&o["header"])?;
             let acc = Accounts::read(&o["accounts"], &hd.state_root, "accounts")?;
             param_rule(&acc, &p.org, &p.token, &p.key, root)?;
-            Ok(Binding { anchor: Some((hd.number, hd.hash)), l2: None, agreed: None })
+            Ok(Binding { anchor: Some((hd.number, hd.hash)), l2: None, agreed: None, logged: None })
         }
         "base" => base(p, root, v),
         "arbitrum" => arbitrum(p, root, v),
@@ -401,7 +402,11 @@ fn binding(ix: &Ix, p: &Project, root: &H256, v: &Value) -> R<Binding> {
             if eps.len() < 2 || eps.iter().any(|e| e.is_empty() || e.contains([',', ' ', '\n'])) {
                 return fail("index", "an agreed proof names fewer than two endpoints, or one that cannot be listed");
             }
-            Ok(Binding { anchor: None, l2: None, agreed: Some((block, eps)) })
+            Ok(Binding { anchor: None, l2: None, agreed: Some((block, eps)), logged: None })
+        }
+        "logged" => {
+            let o = obj(v, &["kind", "block", "tx"], &[], "the proof")?;
+            Ok(Binding { anchor: None, l2: None, agreed: None, logged: Some((uint(&o["block"], "the block")?, fixed(&o["tx"], "the transaction")?)) })
         }
         _ => unreachable!(),
     }
@@ -504,7 +509,7 @@ fn base(p: &Project, root: &H256, v: &Value) -> R<Binding> {
         return fail("binding", "the L2 block does not make the game's output root");
     }
     param_rule(&acc2, &p.org, &p.token, &p.key, root)?;
-    Ok(Binding { anchor: Some((hd.number, hd.hash)), l2: Some((h2.number, h2.hash, if is_final { "final" } else { "claimed" })), agreed: None })
+    Ok(Binding { anchor: Some((hd.number, hd.hash)), l2: Some((h2.number, h2.hash, if is_final { "final" } else { "claimed" })), agreed: None, logged: None })
 }
 
 fn passer_storage_root(list: &Value, state_root: &H256) -> R<H256> {
@@ -556,7 +561,7 @@ fn arbitrum(p: &Project, root: &H256, v: &Value) -> R<Binding> {
     }
     let acc2 = Accounts::read(&l2["accounts"], &h2.state_root, "l2 accounts")?;
     param_rule(&acc2, &p.org, &p.token, &p.key, root)?;
-    Ok(Binding { anchor: Some((hd.number, hd.hash)), l2: Some((h2.number, h2.hash, "confirmed")), agreed: None })
+    Ok(Binding { anchor: Some((hd.number, hd.hash)), l2: Some((h2.number, h2.hash, "confirmed")), agreed: None, logged: None })
 }
 
 /* ── content (sections 7 to 10) ── */
@@ -1056,7 +1061,10 @@ pub fn verify(bundle: &[u8]) -> R<Verified> {
         out.push_str(&format!("l2 {n} {} {what}\n", h(&hh)));
     }
     if let Some((block, eps)) = &b.agreed {
-        out.push_str(&format!("not proved {block} {}\n", eps.join(",")));
+        out.push_str(&format!("not proved agreed {block} {}\n", eps.join(",")));
+    }
+    if let Some((block, tx)) = &b.logged {
+        out.push_str(&format!("not proved logged {block} {}\n", h(tx)));
     }
     out.push_str(&format!("store {store}\n"));
     let mut lines: Vec<(String, String)> = Vec::new();

@@ -62,12 +62,12 @@ The index block is UTF-8 JSON (RFC 8259) with no byte-order mark. A builder writ
   "format":  "abx-archive/1",
   "project": { "chain": <chain id>, "org": <address>, "token": "<decimal>", "key": "abxfs.cid" | "bamfs.cid" },
   "root":    <32-byte hex>,
-  "proof":   { "kind": "ethereum" | "base" | "arbitrum" | "agreed", ... },     section 6
+  "proof":   { "kind": "ethereum" | "base" | "arbitrum" | "agreed" | "logged", ... },     section 6
   "content": { "store": "abxfs" | "bamfs1" | "bamfs2", ... }                 sections 7 to 9
 }
 ```
 
-`project.chain` is 1 (Ethereum), 8453 (Base) or 42161 (Arbitrum One), and the proof kind must fit it: `ethereum` for 1, `base` for 8453, `arbitrum` for 42161, `agreed` for any. `content.store` is `abxfs` when `key` is `abxfs.cid`, and `bamfs1` or `bamfs2` when it is `bamfs.cid`. A mismatch is class `index`.
+`project.chain` is 1 (Ethereum), 8453 (Base) or 42161 (Arbitrum One), and the proof kind must fit it: `ethereum` for 1, `base` for 8453, `arbitrum` for 42161, `agreed` and `logged` for any. `content.store` is `abxfs` when `key` is `abxfs.cid`, and `bamfs1` or `bamfs2` when it is `bamfs.cid`. A mismatch is class `index`.
 
 The root is never all zeros: a project that published nothing has no bundle.
 
@@ -219,7 +219,15 @@ The anchor block is not checked to be finalized or canonical: no offline check c
 { "kind": "agreed", "block": <number>, "endpoints": [<host>, ...] }
 ```
 
-No binding is proved: at least two public endpoints, named here, answered the same root for the token parameter at that block of the project's own chain when the bundle was made. A verifier checks only the content and prints `not proved`. A builder makes these only for a version no proof reaches yet, and a later bundle of the same version can carry a proof.
+No binding is proved: at least two public endpoints, named here, answered the same root for the token parameter at that block of the project's own chain when the bundle was made. A verifier checks only the content and prints `not proved agreed`. A builder makes these only for a version no proof reaches yet, and a later bundle of the same version can carry a proof.
+
+### 6.6 `logged`
+
+```
+{ "kind": "logged", "block": <number>, "tx": <32-byte hex> }
+```
+
+No binding is proved: the project's collection emitted the root as a new value of the token parameter in that transaction, at that block of the project's own chain, as an explorer or endpoint reported the log (the event with topic `0xde0436cfd14f6250e38daf8e3605d7a54612abb0d9a1ac04278609edb949cd78`, the token and the key as its first two indexed arguments, the value as the first word of its data). It is how a version replaced before archiving began is kept: its content is still on chain and is fully checked, but the state that held it is no longer served. A verifier checks only the content and prints `not proved logged`.
 
 ## 7. Content: ABX FS (`abxfs`)
 
@@ -303,7 +311,8 @@ project <chain> <org> <token> <key>
 root <root>
 anchor <number> <hash>                     (absent for agreed)
 l2 <number> <hash> <final|claimed|confirmed>   (base and arbitrum only)
-not proved <block> <endpoint>,<endpoint>…  (agreed only, in the bundle's order)
+not proved agreed <block> <endpoint>,<endpoint>…   (agreed only, in the bundle's order)
+not proved logged <block> <tx>                     (logged only)
 store <store>
 <one line per directory and file>
 end <files> <bytes>
@@ -325,11 +334,11 @@ A manifest is the list of bundles made for a set of projects. It is UTF-8 JSON, 
 
 ```
 { "format": "abx-archive-manifest/1",
-  "versions": [ { "project": {...as in the index...}, "root": <32>, "seen": { "chain block": <number>, "date": "<YYYY-MM-DD>" },
-                  "bundles": [ { "bundle": {"/": "<index cid>"}, "proof": "ethereum" | "base final" | "base claimed" | "arbitrum" | "agreed", "anchor": <number or null>, "bytes": <bundle length> }, ... ] }, ... ] }
+  "versions": [ { "project": {...as in the index...}, "root": <32>, "seen": { "block": <number>, "date": "<YYYY-MM-DD>" | null },
+                  "bundles": [ { "bundle": {"/": "<index cid>"}, "proof": "ethereum" | "base final" | "base claimed" | "arbitrum" | "agreed" | "logged", "anchor": <number or null>, "bytes": <bundle length> }, ... ] }, ... ] }
 ```
 
-Versions are sorted by chain, org, token, key, then the block they were first seen at; a version's bundles in the order they were made. The manifest is a list, not a proof: each bundle is checked on its own. A bundle can be fetched from IPFS by its index CID: `ipfs dag export <cid>` gives the bundle file back byte for byte.
+`seen` is the first block of the project's chain the version is known at, and the day the archive first saw it current (null for a version known only from its log). Versions are sorted by chain, org, token (as a number), key, then `seen.block`; a version's bundles in the order they were made. The manifest is a list, not a proof: each bundle is checked on its own. A bundle can be fetched from IPFS by its index CID: `ipfs dag export <cid>` gives the bundle file back byte for byte.
 
 ## 14. Test vectors
 

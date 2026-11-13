@@ -1,0 +1,10 @@
+abx-archive/1
+project 8453 0x10ddfcbcd62e784c522d0b466ed109fc65b2a855 0 bamfs.cid
+root 0xcf8a87f70cb962fdda065d641b7a542004c5faa0a3f384029f86cc9a9d73d310
+not proved agreed 57013558 mainnet.base.org,base-rpc.publicnode.com,base.drpc.org
+store bamfs1
+f README.txt 29 e664733ae89c4b579e57ce0c407e18618c84ecf00623ee2264991bcd9868e5ee
+d assets/
+f assets/noise.bin.png 153600 f65b9916c1ce2865b1af49c55ef8b75f6bc399185d849093e35f4e1dc8e511af
+f index.html 225 827e8c661af98919a34e0f01fc01246c459c64df03238a30ae96619bf2153b5a
+end 3 153854

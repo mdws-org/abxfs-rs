@@ -1,0 +1,9 @@
+abx-archive/1
+project 8453 0x1111111111111111111111111111111111111111 7 bamfs.cid
+root 0x694452ebac84b3cd4f7b43ea10a35106b18d9f964a04b8ee61c3facb43307f76
+not proved agreed 1000 one.example,two.example
+store bamfs1
+f bom.txt 17 e3e0dc9e9d8c04fe72c1901408a48fae1f4f0937cb0d852fc8de3e40df3f2e3e
+d sub/
+f sub/z.png 200 5c356963ee9b379da648239043f76eebe2f4b31aafd04868f4c8d610d05155c3
+end 2 217

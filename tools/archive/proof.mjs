@@ -118,11 +118,13 @@ async function l1Header(fin) {
   throw new ProvedError('rpc', 'no endpoint gave the anchor header');
 }
 
-const [chainText, org0, token, key, kind, out] = process.argv.slice(2);
-const chain = Number(chainText), org = org0.toLowerCase();
-if (!KEYS[key] || !out) { console.error('usage: proof.mjs <chain id> <org> <token> <abxfs.cid|bamfs.cid> <ethereum|final|claimed|confirmed|agreed> <out.json>'); process.exit(2); }
+// Ethereum's finalized block, from the light client, once for any number of proofs.
+const finalized = () => finalizedBlock({ chainId: 1, checkpoint: CHECKPOINTS[1].root, beacons: BEACONS[1] });
 
-async function make() {
+// { root, proof } for one project and proof kind. `fin` is shared between calls; agreed proofs need none.
+async function prove({ chain, org: org0, token, key, kind, fin }) {
+  const org = org0.toLowerCase();
+  if (!KEYS[key]) refuse(`unknown key ${key}`);
   if (kind === 'agreed') {
     const c = Object.values(CHAINS).find((x) => x.id === chain);
     const data = '0x6bd39222' + BigInt(token).toString(16).padStart(64, '0') + KEYS[key];
@@ -132,7 +134,7 @@ async function make() {
     if (got.length < 2 || new Set(got.map((g) => g[1])).size !== 1) refuse('fewer than two endpoints agree on the root');
     return { root: got[0][1], proof: { kind: 'agreed', block, endpoints: got.map((g) => g[0]) } };
   }
-  const fin = await finalizedBlock({ chainId: 1, checkpoint: CHECKPOINTS[1].root, beacons: BEACONS[1] });
+  fin ||= await finalized();
   const l1 = new Evidence();
   const deps = recording(l1);
   const header = await l1Header(fin);
@@ -194,11 +196,17 @@ async function allLogs({ urls, address, block, assertion }) {
   return all.filter((a) => a.status === 'fulfilled' && Array.isArray(a.value)).flatMap((a) => a.value.slice(0, 64));
 }
 
-try {
-  const { root, proof } = await make();
-  writeFileSync(out, JSON.stringify(proof));
-  console.log(root);
-} catch (e) {
-  console.error(`no proof: ${e.message}`);
-  process.exit(1);
+export { KEYS, finalized, prove };
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const [chain, org, token, key, kind, out] = process.argv.slice(2);
+  if (!KEYS[key] || !out) { console.error('usage: proof.mjs <chain id> <org> <token> <abxfs.cid|bamfs.cid> <ethereum|final|claimed|confirmed|agreed> <out.json>'); process.exit(2); }
+  try {
+    const { root, proof } = await prove({ chain: Number(chain), org, token, key, kind });
+    writeFileSync(out, JSON.stringify(proof));
+    console.log(root);
+  } catch (e) {
+    console.error(`no proof: ${e.message}`);
+    process.exit(1);
+  }
 }
