@@ -8,7 +8,7 @@ use abxfs::chain::{chain_by_name, Client};
 use abxfs::hex::{parse_h256, to_hex};
 use abxfs::json::plan_json;
 use abxfs::plan::{plan_folder, PlanOptions};
-use abxfs::project::{current_root, parse_label, Store};
+use abxfs::project::{bamfs_rpc, current_root, parse_label, Store};
 use abxfs::read::{read_tree, write_tree, Kind};
 use abxfs::scan::ScanOptions;
 use abxfs::verify::{verify, DiffKind};
@@ -175,7 +175,11 @@ fn chain_cmd(cmd: &str, rest: &[String]) -> Result<(), Fail> {
                 return Err(Fail::Error(format!("{} has published nothing", project.label())));
             }
             if c.store == Store::Bamfs {
-                return Err(Fail::Error(format!("{} is on BAMFS, which this command does not read yet", project.label())));
+                if cmd != "read" || out.is_none() {
+                    return Err(Fail::Error(format!("{} is on BAMFS: give --out to read it", project.label())));
+                }
+                eprintln!("{} is BAMFS root {} as {} agree at block {} (not proved)", project.label(), to_hex(&c.root), c.sources.join(", "), c.block);
+                return Ok(write_bamfs(&abxfs::bamfs::read(&bamfs_rpc(&project, rpc)?, &c.root)?, out.as_deref().expect("checked"))?);
             }
             eprintln!("{} is root {} as {} agree at block {} (not proved)", project.label(), to_hex(&c.root), c.sources.join(", "), c.block);
             (c.root, project.chain)
@@ -201,6 +205,29 @@ fn chain_cmd(cmd: &str, rest: &[String]) -> Result<(), Fail> {
         );
     }
     result
+}
+
+fn write_bamfs(tree: &abxfs::bamfs::Tree, out: &std::path::Path) -> Result<(), String> {
+    if tree.is_file {
+        return std::fs::write(out, &tree.files[0].content).map_err(|e| format!("{}: {e}", out.display()));
+    }
+    if out.exists() && std::fs::read_dir(out).map_err(|e| e.to_string())?.next().is_some() {
+        return Err(format!("{} exists and is not empty", out.display()));
+    }
+    std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    for d in &tree.dirs {
+        std::fs::create_dir_all(out.join(d)).map_err(|e| format!("{d}: {e}"))?;
+    }
+    let mut bytes = 0;
+    for f in &tree.files {
+        std::fs::write(out.join(&f.path), &f.content).map_err(|e| format!("{}: {e}", f.path))?;
+        bytes += f.content.len();
+    }
+    for u in &tree.unusable {
+        eprintln!("not written (its name cannot be a path part): {u}");
+    }
+    println!("verified and wrote BAMFS generation {} ({} files, {bytes} bytes) to {}", tree.generation, tree.files.len(), out.display());
+    Ok(())
 }
 
 fn cmd_root(rest: &[String]) -> Result<(), String> {

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use crate::chain::Client;
 use crate::hex::to_hex;
-use crate::project::{current_root, parse_label, Current, Store};
+use crate::project::{bamfs_rpc, current_root, parse_label, Current, Store};
 use crate::read::{read_tree, Kind};
 use crate::Result;
 
@@ -144,10 +144,7 @@ fn handle(mut stream: TcpStream, state: &State, port: u16) -> std::io::Result<()
     if current.root == [0u8; 32] {
         return text(&mut stream, "404 Not Found", "This project has published nothing to ABX FS or BAMFS.", head);
     }
-    if current.store == Store::Bamfs {
-        return text(&mut stream, "501 Not Implemented", "This project is on BAMFS, which this server does not read yet.", head);
-    }
-    let served = match tree_for(state, &project, &current.root) {
+    let served = match tree_for(state, &project, &current) {
         Ok(t) => t,
         Err(e) => return text(&mut stream, "502 Bad Gateway", &format!("The project's files could not be read and checked: {e}"), head),
     };
@@ -179,7 +176,8 @@ fn root_for(state: &State, label: &str, project: &crate::project::Project) -> Re
     Ok(c)
 }
 
-fn tree_for(state: &State, project: &crate::project::Project, root: &[u8; 32]) -> Result<Arc<Served>> {
+fn tree_for(state: &State, project: &crate::project::Project, current: &Current) -> Result<Arc<Served>> {
+    let root = &current.root;
     if let Some(t) = state.trees.lock().unwrap().get(root) {
         return Ok(Arc::clone(t));
     }
@@ -188,6 +186,28 @@ fn tree_for(state: &State, project: &crate::project::Project, root: &[u8; 32]) -
     if let Some(t) = state.trees.lock().unwrap().get(root) {
         return Ok(Arc::clone(t));
     }
+    let served = Arc::new(if current.store == Store::Bamfs { read_bamfs(state, project, root)? } else { read_abxfs(state, project, root)? });
+    let mut trees = state.trees.lock().unwrap();
+    if trees.len() >= MAX_TREES {
+        trees.clear();
+    }
+    trees.insert(*root, Arc::clone(&served));
+    Ok(served)
+}
+
+fn media_type(raw: &[u8]) -> String {
+    let mime = String::from_utf8_lossy(raw).trim().to_string();
+    if mime.is_empty() || mime.contains(['\r', '\n']) { "application/octet-stream".to_string() } else { mime }
+}
+
+fn read_bamfs(state: &State, project: &crate::project::Project, root: &[u8; 32]) -> Result<Served> {
+    let tree = crate::bamfs::read(&bamfs_rpc(project, state.own_rpc.as_deref())?, root)?;
+    let kind = if tree.is_file { Kind::File } else { Kind::Directory };
+    let files = tree.files.into_iter().map(|f| (f.path.into_bytes(), (media_type(f.mime.as_bytes()), Arc::new(f.content)))).collect();
+    Ok(Served { kind, files })
+}
+
+fn read_abxfs(state: &State, project: &crate::project::Project, root: &[u8; 32]) -> Result<Served> {
     let client = Client::connect(project.chain, state.own_rpc.as_deref(), 8)?;
     let tree = read_tree(&client, root, true)?;
     let mut files = HashMap::new();
@@ -196,18 +216,11 @@ fn tree_for(state: &State, project: &crate::project::Project, root: &[u8; 32]) -
             continue;
         }
         let f = &tree.files[&p.cid];
-        let mime = String::from_utf8_lossy(&f.info.mime).trim().to_string();
-        let mime = if mime.is_empty() || mime.contains(['\r', '\n']) { "application/octet-stream".to_string() } else { mime };
+        let mime = media_type(&f.info.mime);
         let content = f.content.clone().ok_or("a file's content was not read")?;
         files.insert(p.path.clone(), (mime, Arc::new(content)));
     }
-    let served = Arc::new(Served { kind: tree.kind, files });
-    let mut trees = state.trees.lock().unwrap();
-    if trees.len() >= MAX_TREES {
-        trees.clear();
-    }
-    trees.insert(*root, Arc::clone(&served));
-    Ok(served)
+    Ok(Served { kind: tree.kind, files })
 }
 
 #[cfg(test)]

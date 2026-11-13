@@ -6,6 +6,8 @@
 
 pub mod abi;
 #[cfg(feature = "cli")]
+pub mod bamfs;
+#[cfg(feature = "cli")]
 pub mod chain;
 pub mod chunking;
 pub mod codec;

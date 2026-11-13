@@ -169,6 +169,12 @@ fn param(eps: &[(Rpc, String)], project: &Project, key: &str, block: u64, need: 
     Ok((got[0].1, got.into_iter().map(|(u, _)| host(&u)).collect()))
 }
 
+/// The endpoint a BAMFS read uses: the reader's own, or the last public one (the one the viewer's tests use).
+pub fn bamfs_rpc(project: &Project, own: Option<&str>) -> Result<Rpc> {
+    let url = own.or_else(|| public_rpcs(project.chain.id).last().copied()).ok_or_else(|| format!("no endpoint for {}", project.chain.name))?;
+    Rpc::new(url, 4)
+}
+
 /// The project's current root: its ABX FS root, or its BAMFS root when it has none.
 pub fn current_root(project: &Project, own: Option<&str>) -> Result<Current> {
     let (eps, block) = endpoints(project, own)?;
