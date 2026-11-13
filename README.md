@@ -205,6 +205,28 @@ Endpoints seldom keep a block that old, so there is often nothing to compare the
 
 The EVM's rules are Ethereum's, and on another chain it refuses what could differ (`OTHER_CHAINS` in `site/evm-state.js`). Measured on live endpoints on 2026-11-12, Base gives a call the gas Ethereum's rules give and charges account reads as Ethereum does, so nothing is refused there. Arbitrum One does not: a call starts with about 190 less gas, by an amount that moves with Ethereum's fees, and other addresses start warm. So on Arbitrum One a value read with `GAS` may only be passed to a call as its gas, and any other use ends the run. Also refused there are the opcodes that read the block (`NUMBER` is Ethereum's block number) and calls to the contracts Arbitrum keeps at 0x64 to 0xff and 0xa4b05. On every chain, code that begins with 0xef is refused: it is not EVM code (on Arbitrum, a Stylus program). Robinhood Chain is not run: no public endpoint keeps its state long enough.
 
+### The check page as one file
+
+`tools/build-check-file.py` makes the check page as one self-contained file, `view-dist-file/abxfs-check.html` (about 577 KB), and `build.txt` beside it with two lines: the build's hash and the file's SHA-256. The file holds the page, its style and every module as text, and a short script turns each module into a `blob:` address. It does not need a host. Keep it, open it from disk, or serve it from anywhere. The same source gives the same bytes, so its SHA-256 can be compared with a published one.
+
+```sh
+python3 tools/build-view.py && python3 tools/build-check-file.py
+open "view-dist-file/abxfs-check.html#1-e8978b5d18980fa16494fb83167c84cbbe9a6816-0"
+```
+
+Opened from disk it reaches the same states as the served page, with these differences:
+
+- No host can switch proving off for it. The switch file belongs to a host.
+- WebKit does not start a worker from a local file. The contract's call is then run in the page, under the same limits, with nothing to end it from outside.
+- It does not run inside another page. A policy written in a page cannot forbid framing, so the file checks for itself.
+- Its links to a project open the public viewer (`fromchain.dynv6.net`), since a file has no hostname of its own to give a project.
+
+`abxfs-check.html` and `build.txt` are meant to be published through ABX FS as one project, so that the checker can itself be read from chain and checked against a root (`abxfs-rs read <root> --chain base --out check`). `PUBLISHED` in `site/published.js` names that project and is empty until one is published. When it is set, every copy of the check page reads `build.txt` from chain, each byte checked against the project's root, and says whether it is the build in that project. It also shows the SHA-256 of the one file published there, which a reader can compare with `shasum -a 256 abxfs-check.html`. The project's root is the one the endpoints agree on, and the line says so: an endpoint that replays an older root can make an old copy read as current. A copy that was tampered with can say anything about itself. The line is for a reader with an honest copy, and the published file hash is for comparing a copy by other means.
+
+### A starting block of your own
+
+A proof starts from one block root. The one built into the viewer is replaced each week by a workflow. The check page also accepts a finalized block root that the reader types in, from a beacon node or a checkpoint provider they trust (`site/start.js`). On a hostname it is kept in that browser. A page opened from disk shares stored data with other local files in some browsers, so there it is used until the page is closed and is not kept. The light client applies the same rules to it. A beacon node must be able to start a light client from that block, and the block must be no older than 14 days. The page cannot tell where a reader's root came from, so it counts only when the sync committee's signatures lead from it to a newer finalized block. The built-in block alone may stand as the newest finalized one. The check page names which block a proof started from, under the verdict and in the facts, and shows the built-in one beside a reader's. The service worker on a project's hostname uses the built-in block only.
+
 ### Arbitrum One and Robinhood Chain
 
 Both run the same rollup contract on Ethereum (`site/arbitrum.js`). Its storage holds the hash of the newest confirmed assertion, read by proof at the finalized Ethereum block. An assertion's hash is `keccak(parent . keccak(state after it) . inbox accumulator)`, and the state after it holds the hash of a rollup block. What the hash was made from comes from the `AssertionCreated` log an endpoint gives, and must hash to it. The rollup block's header, re-hashed, gives its state root, and the project's root is read there by storage proof. The rollup contract is a proxy with two implementations; both addresses are proved and must be the pinned ones.
@@ -247,6 +269,8 @@ node tests/proof-replay.mjs     # recorded proofs from four chains, RLP cases, h
 node tests/proof-mutants.mjs    # proof.js with one check removed at a time
 node tests/verdict.mjs          # the verdict table
 node tests/verdict-mutants.mjs  # the rule for computed pages with one condition removed at a time
+node tests/start.mjs            # a reader's own starting block, and a copy's build against the published one
+node tests/start-mutants.mjs    # start.js and published.js with one rule removed at a time
 node tests/token.mjs            # reading a tokenURI reply, and the agreement rule against made-up endpoints
 node tests/bamfs-replay.mjs     # recorded reads of both BAMFS generations, then altered and targeted lies; FastLZ cases
 node tests/bamfs-mutants.mjs    # bamfs.js with one check removed at a time
@@ -265,6 +289,7 @@ node tests/evm-chains.mjs       # what the EVM refuses on Base and Arbitrum One
 node tests/recheck.mjs          # the service worker's warning for a token page it computes differently
 node tests/evm-rollup-live.mjs               # live: 7 calls over Base and Arbitrum One state at their claims' blocks equal eth_call there
 node tests/recheck-page.mjs                  # live: a token page is served at once and recomputed behind it
+node tests/check-file.mjs                    # live: the one-file check page opened from disk (ENGINE=chromium|webkit|firefox)
 node tests/worker-page.mjs                   # live: the check page's worker runs a call, is ended when it never answers, and may be missing
 node tests/evm-context-live.mjs              # live: gas left, base fee, caller and 15 more values, the same here and on the endpoints
 node tests/evm-live.mjs                      # live: 8 real calls run here over proved state equal eth_call at the finalized block

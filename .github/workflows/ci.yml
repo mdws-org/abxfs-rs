@@ -43,6 +43,12 @@ jobs:
           EVM_DIR="$RUNNER_TEMP/evm" node tests/evm-fuzz.mjs 3000
           node tests/evm-chains.mjs
           EVM_DIR="$RUNNER_TEMP/evm" node tests/evm-mutants.mjs
+      - name: The reader's own starting block and the published build, then each rule removed in turn
+        run: node tests/start.mjs && node tests/start-mutants.mjs
+      - name: The check page as one file is made, and is the same bytes when made again
+        run: |
+          set -e
+          python3 tools/build-view.py && python3 tools/build-check-file.py && shasum -a 256 view-dist-file/abxfs-check.html > one && python3 tools/build-check-file.py && shasum -a 256 -c one
       - name: Verdict rule, then the rule for computed pages with each condition removed in turn
         run: node tests/verdict.mjs && node tests/verdict-mutants.mjs
       - name: Current-root rule, the stop-on-mismatch rule, and the warning for a token page computed differently

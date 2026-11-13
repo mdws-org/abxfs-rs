@@ -6,3 +6,4 @@
 /site/node_modules/
 .DS_Store
 /view-dist/
+/view-dist-file/

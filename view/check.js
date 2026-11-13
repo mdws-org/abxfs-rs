@@ -1,8 +1,11 @@
 // The check page. It runs on its own hostname (check.<host>), where no project's script can reach it, and
 // states what can be said about a project's current root: read by proof, read from the endpoints, and compared.
-import { CHAINS, quantity, rpc } from './chain.js';
+import { CHAINS, quantity, readFile, rpc, walk } from './chain.js';
 import { hostLabel, parseHost, viewUrl } from './target.js';
-import { BEACONS, CHECKPOINTS } from './checkpoint.js';
+import { BEACONS } from './checkpoint.js';
+import { cleaned, isRoot, startingBlock, startingText, unusable } from './start.js';
+import { computedAt as computedHere } from './evm-state.js';
+import { BUILD_FILE, PUBLISHED, compareBuild, publishedBuild } from './published.js';
 import { PROOF_ENDPOINTS, finalizedBlock, provedTokenParam, tokenParamAt } from './proved.js';
 import { judge, judgeComputed, judgeRollup, judgeRollupComputed } from './verdict.js';
 import { BASE_PROOF_ENDPOINTS, baseClaims, baseTokenParam } from './base.js';
@@ -28,6 +31,8 @@ function fact(name, value, mono) {
   $('#facts').hidden = false;
 }
 function say(state, text, reason = '') {
+  // A starting block past its 14 days: when it is the reader's, the remedy is theirs, not a newer copy of the viewer.
+  if (state === 'expired' && ownInForce) { text = 'Agreed by the endpoints. The starting block you gave is too old to prove anything.'; reason = 'A starting block may be no older than 14 days. Give a newer one below, or start from the built-in block.'; }
   $('#verdict').dataset.state = state;
   $('#verdict').textContent = text;
   $('#reason').textContent = reason;
@@ -72,15 +77,95 @@ async function agreedHead(chain, target) {
 }
 
 async function proofSwitch() {
+  // The one-file form of this page belongs to whoever keeps it: no host can switch it off.
+  if (globalThis.ABXFS_WORKER_URL) return true;
   try { const r = await fetch('/_abxfs/switch.json', { cache: 'no-store' }); return !r.ok || (await r.json()).proof !== false; } catch { return true; }
 }
 
-async function run() {
+// The reader's own starting block for a chain, kept in this browser only.
+const START_KEY = (chainId) => `abxfs-start-${chainId}`;
+// A page opened from disk shares its stored data with every other file on that disk in some browsers, so there
+// a reader's block is kept only while the page is open and is typed in again the next time. On a hostname it
+// is kept in this browser. Either way it is read once, when first wanted, and not again during a check.
+const kept = location.protocol !== 'file:';
+const own = new Map();
+const ownStart = (chainId) => {
+  if (!own.has(chainId)) { let v = null; if (kept) { try { v = localStorage.getItem(START_KEY(chainId)); } catch { /* none */ } } own.set(chainId, v); }
+  return own.get(chainId);
+};
+let ownInForce = null; // the reader's block root, once a proof on this page has started from it
+const startOf = (chainId) => { const start = startingBlock(chainId, ownStart(chainId)); if (start && start.own) { ownInForce = start.root; $('#start-banner').hidden = false; $('#start-banner').textContent = `Proofs on this page start from a block root you gave: ${start.root}`; } return start; };
+// The light client, from the starting block in force. A reader's block counts only when a newer finalized block
+// was reached from it (site/start.js).
+async function finalizedFrom(start, chainId) {
+  const fin = await finalizedBlock({ chainId, checkpoint: start.root, beacons: BEACONS[chainId] });
+  const why = unusable(start, fin);
+  if (why) throw Object.assign(new Error(why), { kind: 'check' });
+  return fin;
+}
+// Run the check again in place, after the starting block changes.
+function restart() {
+  $('#facts').replaceChildren(); $('#facts').hidden = true; $('#open').hidden = true; $('#start-banner').hidden = true;
+  ownInForce = null;
+  run().catch((e) => say('failed', 'The check failed.', e.message || String(e)));
+}
+
+// The form for a starting block of the reader's own, for the Ethereum chain the project's proof rests on.
+function startForm(l1) {
+  const built = startingBlock(l1, null), field = $('#start-own');
+  if (!built || !field) return;
+  $('#start').hidden = false;
+  $('#start-chain').textContent = Object.values(CHAINS).find((c) => c.id === l1)?.name || `chain ${l1}`;
+  $('#start-built').textContent = `${built.root} (${startingText(built, count)})`;
+  const mine = startingBlock(l1, ownStart(l1));
+  field.value = mine.own ? mine.root : '';
+  $('#start-note').textContent = `${mine.own ? 'Proofs on this page start from your block.' : 'Proofs on this page start from the built-in block.'}${kept ? '' : ' This page was opened from a file, so a block you give is used until the page is closed and is not kept.'}`;
+  $('#start-save').onclick = () => {
+    if (!isRoot(field.value)) { $('#start-note').textContent = 'That is not a block root: 0x and 64 hex digits.'; return; }
+    own.set(l1, cleaned(field.value));
+    if (kept) { try { localStorage.setItem(START_KEY(l1), cleaned(field.value)); } catch { /* used for this visit only */ } }
+    restart();
+  };
+  $('#start-clear').onclick = () => { own.set(l1, null); if (kept) { try { localStorage.removeItem(START_KEY(l1)); } catch { /* nothing kept */ } } restart(); };
+}
+
+// This copy's build, beside the one published on chain when one is.
+async function buildLine() {
   $('#build').textContent = BUILD;
+  if (!PUBLISHED) return;
+  const chain = Object.values(CHAINS).find((c) => c.id === PUBLISHED.chainId);
+  const note = (r) => { $('#published').textContent = `${r.text.charAt(0).toUpperCase()}${r.text.slice(1)}.`; $('#published').dataset.state = r.state; };
+  try {
+    const head = await agreedHead(chain, { kind: 'project', ...PUBLISHED });
+    // Every byte of build.txt is checked against the project's root as it is read.
+    const read = async (path) => {
+      let last = new Error('no endpoint');
+      for (const url of chain.rpcs) {
+        try {
+          const ctx = { chain, url, requests: 0, ethCalls: 0, block: 'latest' };
+          const tree = await walk(ctx, head.root);
+          const entry = tree.kind === 'file' ? null : tree.items.find((x) => !x.isDir && !x.invalid && x.path === path);
+          if (!entry) throw new Error(`${path} is not in the published project`);
+          return await readFile(ctx, entry.cid, entry.info);
+        } catch (e) { last = e; }
+      }
+      throw last;
+    };
+    const published = await publishedBuild(read);
+    const r = compareBuild(BUILD, published.build);
+    // The project's root is as the endpoints agree on it: nothing here proves it is the newest one published.
+    note({ ...r, text: `${r.text} (project ${hostLabel({ kind: 'project', ...PUBLISHED })}, root ${head.root}, as ${head.sources.length} endpoints agree on it at block ${count(head.block)}; not proved). The one-file check page published there has SHA-256 ${published.sha256}` });
+  } catch (e) { note(compareBuild(BUILD, null, e.message || String(e))); }
+}
+
+async function run() {
+  buildLine();
   const label = decodeURIComponent(location.hash.slice(1));
   const target = label && parseHost(label + '.x');
+  if (!target) startForm(1);
   if (!target) return say('none', 'No project named.', 'Add a project after the # in this address, as "<chain id>-<org address>-<project number>".');
   const chain = Object.values(CHAINS).find((c) => c.id === target.chainId);
+  startForm(ROLLUPS[target.chainId]?.l1 ?? target.chainId);
   const openUrl = viewUrl(target);
   if (openUrl) { $('#open-link').href = openUrl; }
   if (target.kind === 'root') {
@@ -103,20 +188,20 @@ async function run() {
   $('#open').hidden = !openUrl;
 
   if (ROLLUPS[chain.id]) return rollup(chain, target, head);
-  const cp = CHECKPOINTS[chain.id];
+  const cp = startOf(chain.id);
   if (!cp || !PROOF_ENDPOINTS[chain.id]) return say('agreed', 'Agreed by the endpoints. Not proved.', `This viewer has no light client for ${chain.name}. The root above is what ${head.sources.length} public endpoints agree on, and that is all that stands behind it.`);
   if (!await proofSwitch()) return say('agreed', 'Agreed by the endpoints. Proving is switched off.', 'The operator of this host has switched proving off, which is done when a fault is found in it. The root above is what the endpoints agree on.');
 
   say('working', 'Following the sync committee to the newest finalized block…');
   let found;
   try {
-    const fin = await finalizedBlock({ chainId: chain.id, checkpoint: cp.root, beacons: BEACONS[chain.id] });
+    const fin = await finalizedFrom(cp, chain.id);
     say('working', 'Reading the project\'s root by proof…');
     const proved = await provedTokenParam({ fin, urls: PROOF_ENDPOINTS[chain.id], org: target.org, token: target.token, key: head.key });
     const atFinalized = proved.known ? await tokenParamAt({ urls: [...PROOF_ENDPOINTS[chain.id], ...chain.rpcs], org: target.org, token: target.token, blockHash: proved.block.hash, key: head.key }) : [];
     found = { proved, atFinalized };
   } catch (e) {
-    fact('Starting block', `slot ${count(cp.slot)}, ${cp.date}`);
+    fact('Starting block', `${startingText(cp, count)}`);
     // An expired starting block is not a passing fault: this copy of the viewer proves nothing until it is updated.
     if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
     return say('agreed', 'Agreed by the endpoints. Not proved.', `The proof could not be made: ${e.message || e}`);
@@ -133,7 +218,7 @@ async function run() {
     fact('Proof served by', `${proved.via} (checked here; it is not trusted)`);
     fact('Endpoints at that block', atFinalized.length ? atFinalized.map(([h, r]) => `${h}: ${r === proved.root ? 'the same root' : r}`).join('; ') : 'none answered');
   }
-  fact('Starting block', `slot ${count(cp.slot)}, ${cp.date}; trusted for 14 days`);
+  fact('Starting block', `${startingText(cp, count)}; trusted for 14 days`);
   const texts = {
     proved: 'Proved: this is the project\'s root in a finalized block, the endpoints give the same root at that block, and it is still the current one.',
     newer: 'Agreed by the endpoints, not yet provable: this version was published after the last finalized block.',
@@ -149,21 +234,45 @@ async function run() {
 // for the next call. Returns what computedAt returns, without its state; never throws.
 const RUN_MS = 200_000;
 let worker = null, runs = 0;
+// Opened from disk, some browsers will not start a worker from this file. The call is then run in the page: the
+// same code under the same limits (60 seconds of computing, 120 of fetching), with nothing to end it from outside.
+let inPage = false, answered = false; // `answered`: the worker has run a call, so a later error is the call's, not the browser's
+const pageStates = new Map(); // block hash -> proved state, as the worker keeps it
+async function runInPage(args) {
+  const hash = args.fin.executionBlockHash;
+  try {
+    const { state, ...rest } = await computedHere({ ...args, state: pageStates.get(hash) || null });
+    if (state) { pageStates.clear(); pageStates.set(hash, state); }
+    return { ...rest, inPage: true };
+  } catch (e) { return { done: false, why: `the run ended with an error: ${e.message || e}` }; }
+}
 function computedAt(args) {
+  if (inPage) return runInPage(args);
   return new Promise((resolve) => {
     const id = ++runs;
     let timer = 0;
     const end = (result) => { clearTimeout(timer); if (worker) { worker.removeEventListener('message', heard); worker.removeEventListener('error', failed); } resolve(result); };
     const stop = (why) => { if (worker) worker.terminate(); worker = null; end({ done: false, why }); };
-    const heard = (e) => { if (e.data && e.data.id === id) end(e.data.result); };
-    const failed = (e) => stop(`the worker that runs the contract's code failed: ${e.message || 'it could not be started'}`);
+    const heard = (e) => { if (e.data && e.data.id === id) { answered = true; end(e.data.result); } };
+    const failed = (e) => {
+      if (!globalThis.ABXFS_WORKER_URL || answered) return stop(`the worker that runs the contract's code failed: ${e.message || 'it could not be started'}`);
+      // The one-file form: go on without a worker, for this call and the ones after it.
+      if (worker) worker.terminate();
+      worker = null; inPage = true;
+      clearTimeout(timer);
+      resolve(runInPage(args));
+    };
     try {
-      worker ??= new Worker(new URL('./evm-worker.js', import.meta.url), { type: 'module' });
+      // The single-file form of this page makes the worker's script itself; a served copy finds it beside this file.
+      worker ??= globalThis.ABXFS_WORKER_URL ? new Worker(globalThis.ABXFS_WORKER_URL) : new Worker(new URL('./evm-worker.js', import.meta.url), { type: 'module' });
       worker.addEventListener('message', heard);
       worker.addEventListener('error', failed);
       timer = setTimeout(() => stop(`the run was ended after ${RUN_MS / 1000} seconds`), RUN_MS);
       worker.postMessage({ id, ...args });
-    } catch (e) { stop(`this browser could not start a worker to run the contract's code: ${e.message || e}`); }
+    } catch (e) {
+      if (globalThis.ABXFS_WORKER_URL && !answered) return failed(e);
+      stop(`this browser could not start a worker to run the contract's code: ${e.message || e}`);
+    }
   });
 }
 
@@ -202,7 +311,7 @@ async function token(chain, target, head, openUrl) {
   const how = read.field === 'generator' ? 'This is a code project. Its page is built by ABX\'s generator contract from the script the collection stores, when the contract is asked.' : 'This contract keeps its artwork in tokenURI, which the contract computes when asked.';
   const agreed = `${how} ${sources.length} endpoints return the same reply at block ${count(head.block)}, and the page is exactly what that reply holds.`;
   if (RECOMPUTED_ON.has(chain.id)) return rollupToken(chain, target, head, { read, shown, got, agreed });
-  const cp = CHECKPOINTS[chain.id];
+  const cp = startOf(chain.id);
   if (!cp || !PROOF_ENDPOINTS[chain.id]) return say('agreed', 'Agreed by the endpoints. Not proved.', `${agreed} No storage proof covers a computed reply, and this viewer has no light client for ${chain.name}.`);
   if (!await proofSwitch()) return say('agreed', 'Agreed by the endpoints. Proving is switched off.', `${agreed} The operator of this host has switched proving off, which is done when a fault is found in it.`);
 
@@ -211,7 +320,7 @@ async function token(chain, target, head, openUrl) {
   let computed, atFinalized = [];
   const supporting = [];
   try {
-    const fin = await finalizedBlock({ chainId: chain.id, checkpoint: cp.root, beacons: BEACONS[chain.id] });
+    const fin = await finalizedFrom(cp, chain.id);
     say('working', 'Running the contract\'s code here, over state read by proof…');
     computed = await computedAt({ chainId: chain.id, fin, urls: PROOF_ENDPOINTS[chain.id], ...shown.call });
     if (computed.done && computed.success && read.field === 'generator') {
@@ -227,7 +336,7 @@ async function token(chain, target, head, openUrl) {
     }
     if (computed.done) atFinalized = await repliesAt({ urls: [...PROOF_ENDPOINTS[chain.id], ...chain.rpcs], ...shown.call, blockHash: fin.executionBlockHash });
     if (computed.done) {
-      fact('Run here at', `block ${count(computed.block.number)}, finalized; signed by ${fin.participants} of 512 sync committee members`);
+      fact('Run here at', `block ${count(computed.block.number)}, finalized; signed by ${fin.participants} of 512 sync committee members${computed.inPage ? '. Run in the page: this browser starts no worker from a file, so the run cannot be ended early' : ''}`);
       fact('State read by proof', `${count(computed.stats.accounts)} accounts, ${count(computed.stats.words)} storage words, ${count(computed.stats.codeBytes)} bytes of contract code, served by ${computed.via} (checked here; not trusted)`);
       fact('Endpoints at that block', atFinalized.length ? atFinalized.map(([h, r]) => `${h}: ${computed.success && r === computed.output ? 'the same reply' : 'another reply'}`).join('; ') : 'none answered');
     }
@@ -235,7 +344,7 @@ async function token(chain, target, head, openUrl) {
     if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${agreed} ${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
     computed = { done: false, why: `the finalized block could not be established: ${e.message || e}` };
   }
-  fact('Starting block', `slot ${count(cp.slot)}, ${cp.date}; trusted for 14 days`);
+  fact('Starting block', `${startingText(cp, count)}; trusted for 14 days`);
   const v = judgeComputed({ computed, atFinalized, headReply: shown.reply, headBlock: head.block, supporting });
   const texts = {
     proved: 'Recomputed here from proved state, and the endpoints give the same.',
@@ -253,13 +362,13 @@ async function token(chain, target, head, openUrl) {
 const RECOMPUTED_ON = new Set([8453, 42161]);
 async function rollupToken(chain, target, head, { read, shown, got, agreed }) {
   const { name, l1, kind } = ROLLUPS[chain.id];
-  const cp = CHECKPOINTS[l1];
+  const cp = startOf(l1);
   if (!await proofSwitch()) return say('agreed', 'Agreed by the endpoints. Proving is switched off.', `${agreed} The operator of this host has switched proving off, which is done when a fault is found in it.`);
   say('working', 'Following Ethereum\'s sync committee to a finalized block…');
   let computed = null, atClaim = [], final = true;
   const supporting = [];
   try {
-    const fin = await finalizedBlock({ chainId: l1, checkpoint: cp.root, beacons: BEACONS[l1] });
+    const fin = await finalizedFrom(cp, l1);
     say('working', `Reading what ${name} has on Ethereum by proof…`);
     let hash, urls, what;
     if (kind === 'base') {
@@ -286,7 +395,7 @@ async function rollupToken(chain, target, head, { read, shown, got, agreed }) {
       supporting.push({ ok: Boolean(got) && await same(got.call, got.reply), why: got ? 'the token\'s own tokenURI, which holds no page, was not recomputed to the same reply' : 'the endpoints did not agree on the token\'s own tokenURI, so that it holds no page was not established' });
     }
     if (computed.done) {
-      fact('Run here at', `${name} block ${count(computed.block.number)}; ${what}`);
+      fact('Run here at', `${name} block ${count(computed.block.number)}; ${what}${computed.inPage ? '. Run in the page: this browser starts no worker from a file, so the run cannot be ended early' : ''}`);
       fact('State read by proof', `${count(computed.stats.accounts)} accounts, ${count(computed.stats.words)} storage words, ${count(computed.stats.codeBytes)} bytes of contract code, served by ${computed.via} (checked here; not trusted)`);
       fact('Endpoints at that block', atClaim.length ? atClaim.map(([h, r]) => `${h}: ${computed.success && r === computed.output ? 'the same reply' : 'another reply'}`).join('; ') : 'none keeps that block');
     }
@@ -294,7 +403,7 @@ async function rollupToken(chain, target, head, { read, shown, got, agreed }) {
     if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${agreed} ${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
     computed = { done: false, why: `what ${name} has on Ethereum could not be read by proof: ${e.message || e}` };
   }
-  fact('Starting block', `Ethereum slot ${count(cp.slot)}, ${cp.date}; trusted for 14 days`);
+  fact('Starting block', `${startingText(cp, count, 'Ethereum')}; trusted for 14 days`);
   const v = judgeRollupComputed({ computed, atClaim, headReply: shown.reply, supporting });
   const texts = {
     recomputed: `Recomputed here from the state of ${name}'s ${kind === 'base' ? (final ? 'final claim' : 'newest claim') : 'confirmed assertion'} on Ethereum. Not proved.`,
@@ -308,14 +417,14 @@ async function rollupToken(chain, target, head, { read, shown, got, agreed }) {
 // A rollup: which of its claims on Ethereum the current root matches.
 async function rollup(chain, target, head) {
   const { name, l1, kind } = ROLLUPS[chain.id];
-  const cp = CHECKPOINTS[l1];
+  const cp = startOf(l1);
   if (!await proofSwitch()) return say('agreed', 'Agreed by the endpoints. Proving is switched off.', 'The operator of this host has switched proving off, which is done when a fault is found in it. The root above is what the endpoints agree on.');
   say('working', 'Following Ethereum\'s sync committee to a finalized block…');
   // What the rollup has on Ethereum: `settled` is a claim that is final there, `newest` one that is not (Base only).
   let settled = null, newest = null, anchor = null, latest = null, latestWhy = '', l1Block;
   const unread = (number) => (e) => ({ known: false, why: `the root at ${number} could not be read by proof: ${e.message || e}` });
   try {
-    const fin = await finalizedBlock({ chainId: l1, checkpoint: cp.root, beacons: BEACONS[l1] });
+    const fin = await finalizedFrom(cp, l1);
     say('working', `Reading what ${name} has on Ethereum by proof…`);
     if (kind === 'base') {
       const claims = await baseClaims({ fin, urls: PROOF_ENDPOINTS[l1] });
@@ -334,7 +443,7 @@ async function rollup(chain, target, head) {
       anchor = await rollupTokenParam({ claim, chainId: chain.id, org: target.org, token: target.token, key: head.key }).catch(unread(`block ${claim.blockHash}`));
     }
   } catch (e) {
-    fact('Starting block', `Ethereum slot ${count(cp.slot)}, ${cp.date}`);
+    fact('Starting block', `${startingText(cp, count, 'Ethereum')}`);
     if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
     return say('agreed', 'Agreed by the endpoints. Not proved.', `What ${name} has on Ethereum could not be read by proof: ${e.message || e}`);
   }
@@ -348,7 +457,7 @@ async function rollup(chain, target, head) {
   line(newest, latest, 'Newest claim, not final');
   if (!newest && latestWhy) fact('Newest claim', `not counted: ${latestWhy}`);
   fact('Read at', `Ethereum block ${count(l1Block.number)}, finalized`);
-  fact('Starting block', `Ethereum slot ${count(cp.slot)}, ${cp.date}; trusted for 14 days`);
+  fact('Starting block', `${startingText(cp, count, 'Ethereum')}; trusted for 14 days`);
   const v = judgeRollup({ anchor, latest, agreedHead: head });
   const texts = {
     settled: `Matches the state ${name} has made final on Ethereum: the endpoints' root is the project's root in that state.`,
