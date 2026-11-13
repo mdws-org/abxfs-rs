@@ -58,13 +58,13 @@ const badCode = (t, edit) => { t.code[t.A] = edit(t.code[t.A]); };
 const OK = { anchor: 5000, latest: 11000 }, NO_LATEST = { anchor: 5000, latest: null };
 const CASES = [
   ['an honest state', undefined, OK],
-  ['the portal was upgraded', at('after', (t) => t.set(PORTAL, IMPL, '0x' + '77'.repeat(20))), 'refuse'],
-  ['the registry was upgraded', at('after', (t) => t.set(REGISTRY, IMPL, '0x' + '77'.repeat(20))), 'refuse'],
-  ['the factory was upgraded', at('after', (t) => t.set(FACTORY, IMPL, '0x' + '77'.repeat(20))), 'refuse'],
+  ['the portal was upgraded', at('after', (t) => t.set(PORTAL, IMPL, '0x' + '77'.repeat(20))), 'upgraded'],
+  ['the registry was upgraded', at('after', (t) => t.set(REGISTRY, IMPL, '0x' + '77'.repeat(20))), 'upgraded'],
+  ['the factory was upgraded', at('after', (t) => t.set(FACTORY, IMPL, '0x' + '77'.repeat(20))), 'upgraded'],
   ['the portal names another registry', at('after', (t) => t.set(PORTAL, S(62), '0x' + '77'.repeat(20))), 'refuse'],
   ['the registry names another factory', at('after', (t) => t.set(REGISTRY, S(1), '0x' + '77'.repeat(20))), 'refuse'],
   ['the registry respects another game type', at('after', (t) => t.set(REGISTRY, S(6), 622n | (BigInt(RETIRED) << 32n))), 'refuse'],
-  ['the factory makes games from another implementation', at('after', (t) => t.set(FACTORY, k(w(621), w(101)), '0x' + '77'.repeat(20))), 'refuse'],
+  ['the factory makes games from another implementation', at('after', (t) => t.set(FACTORY, k(w(621), w(101)), '0x' + '77'.repeat(20))), 'upgraded'],
   ['the factory has no games', at('before', (t) => { t.listLength = 0n; }), 'refuse'],
   ['the anchor game lost its challenge', at('before', (t) => { t.anchor.status = 1; }), 'refuse'],
   ['the anchor game is unresolved', at('before', (t) => { t.anchor.status = 0; }), 'refuse'],
@@ -87,7 +87,7 @@ let bad = 0;
 for (const [name, tweak, want] of CASES) {
   let got;
   try { const c = await baseClaims({ fin: {}, urls: [], deps: world(tweak) }); got = { anchor: c.anchor.l2Block, latest: c.latest ? c.latest.l2Block : null }; }
-  catch (e) { got = e.kind === 'check' ? 'refuse' : `crash: ${e.message}`; }
+  catch (e) { got = e.kind === 'check' ? 'refuse' : e.kind === 'upgraded' ? 'upgraded' : `crash: ${e.message}`; }
   const ok = JSON.stringify(got) === JSON.stringify(want);
   bad += !ok;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${typeof got === 'string' ? got : `anchor ${got.anchor}, latest ${got.latest}`}${ok ? '' : ` (wanted ${JSON.stringify(want)})`}`);

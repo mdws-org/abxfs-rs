@@ -33,8 +33,8 @@ const at = (phase, fn) => (t, when) => { if (when === phase) fn(t); };
 const CASES = [
   ['an honest state', undefined, '0x' + BLOCK_HASH],
   ['the rollup contract does not exist', at('before', (t) => { t.gone = true; }), 'refuse'],
-  ['the admin logic was upgraded', at('before', (t) => { t.store[PRIMARY] = '0x' + w('0x' + '77'.repeat(20)); }), 'refuse'],
-  ['the user logic was upgraded', at('before', (t) => { t.store[SECONDARY] = '0x' + w('0x' + '77'.repeat(20)); }), 'refuse'],
+  ['the admin logic was upgraded', at('before', (t) => { t.store[PRIMARY] = '0x' + w('0x' + '77'.repeat(20)); }), 'upgraded'],
+  ['the user logic was upgraded', at('before', (t) => { t.store[SECONDARY] = '0x' + w('0x' + '77'.repeat(20)); }), 'upgraded'],
   ['there is no confirmed assertion', at('before', (t) => { t.store['0x' + w(116)] = '0x' + w(0); }), 'refuse'],
   ['the assertion is not marked confirmed', at('before', (t) => { t.status = 1; }), 'refuse'],
   ['the assertion names an Ethereum block after the proved one', at('before', (t) => { t.createdAt = 1001; }), 'refuse'],
@@ -49,7 +49,7 @@ const CASES = [
 let bad = 0;
 for (const [name, tweak, want] of CASES) {
   let got;
-  try { got = (await confirmed({ fin: {}, urls: [], chainId: 42161, deps: world(tweak) })).blockHash; } catch (e) { got = e.kind === 'check' ? 'refuse' : e.kind === 'rpc' ? 'rpc' : `crash: ${e.message}`; }
+  try { got = (await confirmed({ fin: {}, urls: [], chainId: 42161, deps: world(tweak) })).blockHash; } catch (e) { got = e.kind === 'check' ? 'refuse' : e.kind === 'upgraded' ? 'upgraded' : e.kind === 'rpc' ? 'rpc' : `crash: ${e.message}`; }
   const ok = got === want;
   bad += !ok;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${got}${ok ? '' : ` (wanted ${want})`}`);

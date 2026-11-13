@@ -14,6 +14,7 @@
             <h1 id="title">Check a project's current version</h1>
             <p id="verdict" role="status" data-state="working">Reading…</p>
             <p id="reason" class="soft"></p>
+            <p id="start-banner" role="status" hidden></p>
             <p id="open" hidden><a id="open-link" href="#">Open the project</a></p>
             <dl id="facts" hidden></dl>
 
@@ -40,7 +41,43 @@
                 built into this viewer, and at least two thirds of each sync committee since then being honest.
                 Committee members are not penalised for signing a false block.
             </p>
+            <div id="start" hidden>
+                <h2>The starting block</h2>
+                <p>
+                    A proof starts from one block root. One is built into this viewer and is replaced each
+                    week. You can give one of your own for <span id="start-chain"></span>: a finalized block
+                    root from a beacon node or a checkpoint provider you trust, no older than 14 days. Then
+                    nothing here rests on the built-in one. This page cannot tell where your block root came
+                    from. It counts only when the sync committee's signatures lead from it to a newer
+                    finalized block.
+                </p>
+                <p><input id="start-own" class="mono" size="66" spellcheck="false" autocomplete="off" aria-label="A starting block root of your own" placeholder="0x and 64 hex digits" /></p>
+                <p>
+                    <button id="start-save" type="button">Start from this block</button>
+                    <button id="start-clear" type="button">Start from the built-in block</button>
+                </p>
+                <p id="start-note" class="soft" role="status"></p>
+                <p class="soft">Built in: <span id="start-built" class="mono"></span></p>
+                <p class="soft">
+                    Checkpoint-sync services publish a recent finalized root. Several run independently of
+                    each other: sync-mainnet.beaconcha.in, mainnet.checkpoint.sigp.io, beaconstate.ethstaker.cc,
+                    mainnet-checkpoint-sync.stakely.io and sync.invis.tools. Each one's
+                    <span class="mono">/checkpointz/v1/status</span> page gives it under "finalized". This page
+                    cannot read them itself (they do not allow it), so compare two or three and paste the root.
+                </p>
+                <h2>Your own nodes</h2>
+                <p>
+                    A consensus node with the light client routes turned on, and an execution node, are asked
+                    before the public ones. They are only asked for data: what they return is checked like any
+                    server's. A browser asks a node from this page only at an https address, or at http on
+                    localhost, and only when the node allows requests from other sites.
+                </p>
+                <p><input id="node-consensus" class="mono" size="50" spellcheck="false" autocomplete="off" aria-label="Your consensus node" placeholder="consensus node, e.g. http://localhost:5052" /> <button id="node-consensus-save" type="button">Use</button></p>
+                <p><input id="node-execution" class="mono" size="50" spellcheck="false" autocomplete="off" aria-label="Your execution node" placeholder="execution node, e.g. http://localhost:8545" /> <button id="node-execution-save" type="button">Use</button></p>
+                <p id="node-note" class="soft" role="status"></p>
+            </div>
             <p class="soft">Viewer build <span id="build" class="mono"></span></p>
+            <p id="published" class="soft" role="status"></p>
         </main>
     </body>
 </html>

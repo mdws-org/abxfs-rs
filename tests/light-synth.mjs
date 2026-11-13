@@ -109,17 +109,23 @@ const CASES = [
   ['a bootstrap branch padded with a non-zero entry', () => chain({ padBootstrap: rand32() }), 'check'],
   ['the server still offers the finalized block before the shipped one: the shipped block is used', () => chain({ lateBoot: true }), 'accept'],
   ['a new period begins while the client is running: one more hand-over is followed', () => chain(), 'accept', (c) => (reads) => (reads === 0 ? (net.genesisTime + (4 * P - 2) * 12) * 1000 : c.now)],
+  ['the server reports a fork this client does not list', () => withFork(chain(), '0x0a000003'), 'fork'],
+  ['the server reports the fork this client is on', () => withFork(chain(), '0x0a000002'), 'accept'],
+  ['the server reports a fork this client lists, from another epoch', () => withFork(chain(), '0x0a000002', '7'), 'fork'],
+  ['the server reports a fork in a form that is not a version', () => withFork(chain(), 'gloas'), 'accept'],
   ['the hand-over update is withheld', () => chain({ skipPeriod: true }), 'check'],
   ['the shipped block is more than 14 days old', () => chain(), 'stale', (c) => c.now + 13.6 * 86_400_000],
   ['the newest finalized block is 257 slots old', () => chain(), 'old', (c) => c.now + (257 - 83) * 12_000],
   ['the newest finalized block is 250 slots old', () => chain(), 'accept', (c) => c.now + (250 - 83) * 12_000],
 ];
 
+function withFork(c, version, epoch = '0') { c.replies['/eth/v1/beacon/states/head/fork'] = { data: { previous_version: '0x0a000001', current_version: version, epoch } }; return c; }
+
 let failed = 0;
 for (const [name, build, want, clock] of CASES) {
   const c = build();
   let got;
-  try { const r = await run(c, clock ? clock(c) : c.now); got = r.executionBlockHash === c.want ? 'accept' : `accepted the wrong block ${r.executionBlockHash}`; }
+  try { const r = await run(c, clock ? clock(c) : c.now); got = r.executionBlockHash !== c.want ? `accepted the wrong block ${r.executionBlockHash}` : !/^0x[0-9a-f]{64}$/.test(r.finalizedRoot) || (r.shipped ? r.finalizedRoot !== c.checkpoint.toLowerCase() : r.finalizedRoot === c.checkpoint.toLowerCase()) ? `no finalized root to start from: ${r.finalizedRoot}` : 'accept'; }
   catch (e) { got = e.constructor.name === 'LightError' ? e.kind : `crash: ${e.message}`; }
   const ok = got === want;
   if (!ok) failed++;

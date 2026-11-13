@@ -10,6 +10,9 @@ const src = await readFile(join(root, 'site/light.js'), 'utf8');
 // [what is removed, text to find, replacement]
 const MUTANTS = [
   ['the BLS signature check', 'if (!eth_fast_aggregate_verify(committee, bits, signingRoot, signature))', 'if (false)'],
+  ['an unknown fork being said', "if (!listed) throw new LightError('fork',", "if (false) throw new LightError('fork',"],
+  ['a listed fork from another epoch being said', "if (since !== null && since !== listed[1]) throw", "if (false) throw"],
+  ['the finalized root to start from next', 'finalizedRoot: shipped ? toHex(root) : toHex(beaconBlockHeaderRoot(u.finalized.beacon)),', 'finalizedRoot: toHex(root),'],
   ['the two-thirds participation rule', 'if (participants * 3 < SYNC_COMMITTEE_SIZE * 2)', 'if (false)'],
   ['the base fee fitting in 256 bits', "if (base >> 256n) refuse(`${what} base fee does not fit in 256 bits`);", ''],
   ['signature slot after the signed header', 'if (signatureSlot <= attested.beacon.slot)', 'if (false)'],

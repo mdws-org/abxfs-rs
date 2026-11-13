@@ -85,14 +85,16 @@ const beaconGet = (base) => async (path) => {
 async function finalizedBlock({ chainId, checkpoint, beacons, now = Date.now }) {
   const net = NETWORKS[chainId];
   if (!net || !checkpoint || !beacons || !beacons.length) throw new ProvedError('unsupported', 'this viewer has no light client for this chain');
-  let last;
+  let last, fork = null;
   for (const base of beacons) {
     try { return await sync({ net, checkpoint, get: beaconGet(base), now }); } catch (e) {
       if (e.kind === 'stale') throw e;
-      last = e;
+      if (e.kind === 'fork') fork = e; else last = e;
     }
   }
-  throw last;
+  // An unknown fork is said only when no server got the client through: one server's word that Ethereum
+  // forked does not outweigh another that answered in a form this client reads.
+  throw fork || last;
 }
 
 // One token parameter, read by proof at the block `fin` names. `urls` are tried in turn until one returns a

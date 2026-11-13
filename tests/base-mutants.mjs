@@ -7,11 +7,11 @@ import { join } from 'node:path';
 const root = join(new URL('.', import.meta.url).pathname, '..');
 const src = await readFile(join(root, 'site/base.js'), 'utf8');
 const MUTANTS = [
-  ['an upgraded contract is not read', "if (addressOf(a.words[0]) !== want) refuse(`${name} has been upgraded since this viewer was written, so its storage is not read`);", ''],
+  ['an upgraded contract is not read', "if (addressOf(a.words[0]) !== want) upgraded(`${name} has been upgraded since this viewer was written, so its storage is not read`);", ''],
   ['the portal naming this registry', "if (addressOf(portal.words[0]) !== REGISTRY) refuse('the portal names another anchor state registry');", ''],
   ['the registry naming this factory', "if (addressOf(registry.words[0]) !== FACTORY) refuse('the registry names another dispute game factory');", ''],
   ['the respected game type', "if (Number(packed & 0xffffffffn) !== GAME_TYPE) refuse('the registry respects a game type this viewer does not read');", ''],
-  ['the factory\'s implementation for the type', "if (addressOf(factory.words[0]) !== '0x' + GAME_IMPL) refuse('the factory creates games from another implementation');", ''],
+  ['the factory\'s implementation for the type', "if (addressOf(factory.words[0]) !== '0x' + GAME_IMPL) upgraded('the factory creates games from another implementation');", ''],
   ['the anchor having won', "if (anchor.status !== STATUS.defenderWins) refuse('the anchor game did not resolve in the claimant\\'s favour');", ''],
   ['the clone being the pinned one', '!code.startsWith(CLONE_HEAD) || ', ''],
   ['the factory\'s record naming this game', 'if (addressOf(word(record)) !== proxy || Number(record >> 224n) !== GAME_TYPE)', 'if (false)'],

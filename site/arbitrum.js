@@ -21,6 +21,8 @@ const word = (n) => BigInt(n).toString(16).padStart(64, '0');
 const hash = (...hex) => toHex(keccak256(fromHex(hex.map((h) => h.replace(/^0x/, '')).join(''))));
 const addressOf = (w) => '0x' + w.slice(-40);
 const refuse = (message) => { throw new ProvedError('check', message); };
+// The contracts on Ethereum are not the ones this viewer was written for: it cannot read them, and says so.
+const upgraded = (message) => { throw new ProvedError('upgraded', message); };
 
 const PRIMARY_SLOT = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc'; // EIP-1967: the admin logic
 const SECONDARY_SLOT = '0x2b1dbce74324248c222f0ec2d5ed7bd323cfc425b336f0253c5ccfda7265546d'; // the user logic
@@ -48,7 +50,7 @@ async function confirmed({ fin, urls, chainId, deps = { provedAccount, logs } })
   const r = ROLLUPS[chainId] || refuse(`no rollup contract is known for chain ${chainId}`);
   const top = await deps.provedAccount({ fin, urls, address: r.rollup, slots: [PRIMARY_SLOT, SECONDARY_SLOT, LATEST_CONFIRMED] });
   if (!top.exists) refuse(`${r.name}'s rollup contract does not exist at the finalized block`);
-  if (addressOf(top.words[0]) !== r.primary || addressOf(top.words[1]) !== r.secondary) refuse(`${r.name}'s rollup contract has been upgraded since this viewer was written, so its storage is not read`);
+  if (addressOf(top.words[0]) !== r.primary || addressOf(top.words[1]) !== r.secondary) upgraded(`${r.name}'s rollup contract has been upgraded since this viewer was written, so its storage is not read`);
   const assertion = top.words[2];
   if (BigInt(assertion) === 0n) refuse(`${r.name} has no confirmed assertion`);
   const node = BigInt((await deps.provedAccount({ fin, urls, address: r.rollup, slots: [hash(assertion, word(ASSERTIONS))] })).words[0]);
