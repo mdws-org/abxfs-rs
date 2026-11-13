@@ -29,9 +29,10 @@ function startingBlock(chainId, own, checkpoints = CHECKPOINTS, remembered = nul
 // What to remember after a run of the light client from `start` reached `fin`, so that the next visit starts
 // from it: the finalized block's root, slot and date. Null when there is nothing newer to remember: the run fell
 // back to its starting block, or the block is no newer than the built-in one or than what is remembered.
-// A reader's own root is never the start of something remembered: the next visit would carry it on unseen.
+// A reader's own root, and a root the consensus servers agreed on, are never the start of something remembered:
+// the next visit would carry them on unseen, with the standing of a block this browser reached on its own.
 function rememberable(start, fin, genesisTime, remembered = null) {
-  if (!start || start.own || !fin || fin.shipped || !isRoot(fin.finalizedRoot) || !Number.isSafeInteger(fin.finalizedSlot)) return null;
+  if (!start || start.own || start.agreed || !fin || fin.shipped || !isRoot(fin.finalizedRoot) || !Number.isSafeInteger(fin.finalizedSlot)) return null;
   const floor = Math.max(start.built ? start.built.slot : 0, remembered && Number.isSafeInteger(remembered.slot) ? remembered.slot : 0);
   if (fin.finalizedSlot <= floor) return null;
   const date = new Date((genesisTime + fin.finalizedSlot * 12) * 1000).toISOString().slice(0, 10);
@@ -50,7 +51,8 @@ function agreedStart(answers, built) {
     if (!groups.has(key)) groups.set(key, { root: cleaned(a.root), slot: a.slot, hosts: new Set() });
     groups.get(key).hosts.add(host);
   }
-  const ok = [...groups.values()].filter((g) => g.hosts.size >= 2).sort((x, y) => y.slot - x.slot);
+  // An agreed block no newer than the built-in one adds nothing and may be one the servers kept from long ago.
+  const ok = [...groups.values()].filter((g) => g.hosts.size >= 2 && (!built || g.slot > built.slot)).sort((x, y) => y.slot - x.slot);
   if (!ok.length) return null;
   return { root: ok[0].root, slot: ok[0].slot, agreed: [...ok[0].hosts].sort(), own: false, built };
 }
@@ -70,6 +72,7 @@ function startingText(start, count, chain = '') {
 // only when the sync committee's signatures carried the client from it to a newer finalized block.
 function unusable(start, fin) {
   if (start.own && fin.shipped) return 'no finalized block newer than the block root you gave was offered, so nothing here shows that your block is final';
+  if (start.agreed && fin.shipped) return `no finalized block newer than the one ${start.agreed.join(' and ')} agree on was offered, so nothing here shows that it is final`;
   return null;
 }
 

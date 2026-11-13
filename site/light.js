@@ -294,8 +294,13 @@ async function sync({ net, checkpoint, get, now = Date.now }) {
   // taken to mean anything.
   const head = await get('/eth/v1/beacon/states/head/fork').catch(() => null);
   const current = head && head.data && typeof head.data.current_version === 'string' ? head.data.current_version.toLowerCase() : null;
-  if (current && /^0x[0-9a-f]{8}$/.test(current) && !net.forks.some(([, , version]) => version === current)) {
-    throw new LightError('fork', `the consensus server reports fork version ${current} since epoch ${String(head.data.epoch).slice(0, 12)}, which this viewer does not read`);
+  if (current && /^0x[0-9a-f]{8}$/.test(current)) {
+    const listed = net.forks.find(([, , version]) => version === current);
+    const since = /^\d{1,12}$/.test(String(head.data.epoch)) ? Number(head.data.epoch) : null;
+    if (!listed) throw new LightError('fork', `a consensus server reports fork version ${current} since epoch ${since ?? 'unknown'}, which this viewer does not read`);
+    // A fork this client lists at another epoch would fail its signature checks around that epoch with no
+    // better reason given: name the difference instead.
+    if (since !== null && since !== listed[1]) throw new LightError('fork', `a consensus server reports the ${listed[0]} fork from epoch ${since}, and this viewer has it at epoch ${listed[1]}`);
   }
 
   const boot = (await get(`/eth/v1/beacon/light_client/bootstrap/${checkpoint}`))?.data || refuse('the bootstrap reply is empty');

@@ -44,20 +44,23 @@ check(S.rememberable(start(MINE), FIN, 1606824023) === null, 'nothing is remembe
 check(S.rememberable(start(null), { ...FIN, shipped: true }, 1606824023) === null, 'nothing is remembered when the run fell back to its starting block');
 check(S.rememberable(start(null), { ...FIN, finalizedSlot: 100 }, 1606824023) === null, 'a block no newer than the built-in one is not remembered');
 check(S.rememberable(start(null), FIN, 1606824023, { ...R, slot: 900 }) === null, 'a block no newer than the remembered one is not remembered');
+check(S.rememberable({ ...start(null), agreed: ['a', 'b'] }, FIN, 1606824023) === null, 'nothing is remembered from a run that started at an agreed block');
+check(S.unusable({ ...start(null), agreed: ['a', 'b'] }, { shipped: true }) !== null && S.unusable({ ...start(null), agreed: ['a', 'b'] }, { shipped: false }) === null, 'an agreed block counts only when a newer finalized block is reached from it');
 check(S.rememberable(start(null), { ...FIN, finalizedRoot: 'x' }, 1606824023) === null, 'a finalized root that is not one is not remembered');
 check(S.rememberable(start(null), FIN, 1606824023, { ...R, slot: 600 })?.slot === 900, 'a block newer than the remembered one replaces it');
 // A starting block the consensus servers agree on.
 const X = '0x' + 'e1'.repeat(32), Y = '0x' + 'e2'.repeat(32);
 for (const [name, answers, want] of [
-  ['two servers give the same block', [['a', { root: X, slot: 10 }], ['b', { root: X, slot: 10 }]], X],
-  ['only one server answered', [['a', { root: X, slot: 10 }]], null],
-  ['two servers give different blocks', [['a', { root: X, slot: 10 }], ['b', { root: Y, slot: 11 }]], null],
-  ['the same root at different slots', [['a', { root: X, slot: 10 }], ['b', { root: X, slot: 11 }]], null],
-  ['one host answering twice', [['a', { root: X, slot: 10 }], ['a', { root: X, slot: 10 }]], null],
-  ['two agree on an older block and two on a newer one: the newer', [['a', { root: X, slot: 10 }], ['b', { root: X, slot: 10 }], ['c', { root: Y, slot: 20 }], ['d', { root: Y, slot: 20 }]], Y],
+  ['two servers give the same block', [['a', { root: X, slot: 110 }], ['b', { root: X, slot: 110 }]], X],
+  ['only one server answered', [['a', { root: X, slot: 110 }]], null],
+  ['two servers give different blocks', [['a', { root: X, slot: 110 }], ['b', { root: Y, slot: 111 }]], null],
+  ['the same root at different slots', [['a', { root: X, slot: 110 }], ['b', { root: X, slot: 111 }]], null],
+  ['one host answering twice', [['a', { root: X, slot: 110 }], ['a', { root: X, slot: 110 }]], null],
+  ['two agree on an older block and two on a newer one: the newer', [['a', { root: X, slot: 110 }], ['b', { root: X, slot: 110 }], ['c', { root: Y, slot: 120 }], ['d', { root: Y, slot: 120 }]], Y],
+  ['two agree on a block no newer than the built-in one', [['a', { root: X, slot: 100 }], ['b', { root: X, slot: 100 }]], null],
   ['a reply that is not a block', [['a', { root: 'x', slot: 10 }], ['b', { root: 'x', slot: 10 }]], null],
 ]) { const r = S.agreedStart(answers, BUILT[1]); check(want === null ? r === null : r && r.root === want && r.agreed.length >= 2 && r.own === false, `agreed start: ${name}`, r); }
-{ const r = S.agreedStart([['a.example', { root: X, slot: 10 }], ['b.example', { root: X, slot: 10 }]], BUILT[1]); const t = S.startingText(r, count); check(/a finalized block a\.example and b\.example agree on.*built-in one.*has expired/.test(t), 'an agreed start is said to rest on those servers', t); }
+{ const r = S.agreedStart([['a.example', { root: X, slot: 200 }], ['b.example', { root: X, slot: 200 }]], BUILT[1]); const t = S.startingText(r, count); check(/a finalized block a\.example and b\.example agree on.*built-in one.*has expired/.test(t), 'an agreed start is said to rest on those servers', t); }
 { const t = S.startingText(S.startingBlock(1, null, BUILT, R), count); check(/earlier visit.*built-in one is slot 100/.test(t), 'a remembered start is said to be one', t); }
 
 // A reader's block must be shown to be final: the light client falling back to its starting block is not enough.

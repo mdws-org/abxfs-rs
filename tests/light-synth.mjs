@@ -111,6 +111,7 @@ const CASES = [
   ['a new period begins while the client is running: one more hand-over is followed', () => chain(), 'accept', (c) => (reads) => (reads === 0 ? (net.genesisTime + (4 * P - 2) * 12) * 1000 : c.now)],
   ['the server reports a fork this client does not list', () => withFork(chain(), '0x0a000003'), 'fork'],
   ['the server reports the fork this client is on', () => withFork(chain(), '0x0a000002'), 'accept'],
+  ['the server reports a fork this client lists, from another epoch', () => withFork(chain(), '0x0a000002', '7'), 'fork'],
   ['the server reports a fork in a form that is not a version', () => withFork(chain(), 'gloas'), 'accept'],
   ['the hand-over update is withheld', () => chain({ skipPeriod: true }), 'check'],
   ['the shipped block is more than 14 days old', () => chain(), 'stale', (c) => c.now + 13.6 * 86_400_000],
@@ -118,7 +119,7 @@ const CASES = [
   ['the newest finalized block is 250 slots old', () => chain(), 'accept', (c) => c.now + (250 - 83) * 12_000],
 ];
 
-function withFork(c, version) { c.replies['/eth/v1/beacon/states/head/fork'] = { data: { previous_version: '0x0a000001', current_version: version, epoch: '9' } }; return c; }
+function withFork(c, version, epoch = '0') { c.replies['/eth/v1/beacon/states/head/fork'] = { data: { previous_version: '0x0a000001', current_version: version, epoch } }; return c; }
 
 let failed = 0;
 for (const [name, build, want, clock] of CASES) {

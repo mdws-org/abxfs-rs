@@ -126,8 +126,9 @@ async function finalizedFrom(start, chainId) {
     if (e.kind !== 'stale' || start.own) throw e;
     const next = agreedStart(await finalizedHeaders(chainId), start.built);
     if (!next) throw e;
-    Object.assign(start, next, { remembered: false });
-    banner(`The built-in starting block has expired. Proofs on this page start from a block ${next.agreed.join(' and ')} agree on, not from one this viewer shipped with.`);
+    const which = start.remembered ? 'The block this browser remembered from an earlier visit' : 'The built-in starting block';
+    Object.assign(start, next, { remembered: false, date: new Date((NETWORKS[chainId].genesisTime + next.slot * 12) * 1000).toISOString().slice(0, 10) });
+    banner(`${which} has expired. Proofs on this page start from a block ${next.agreed.join(' and ')} agree on, not from one this viewer shipped with.`);
     fin = await finalizedBlock({ chainId, checkpoint: start.root, beacons: beaconUrls(chainId) });
   }
   const why = unusable(start, fin);
@@ -147,9 +148,11 @@ async function finalizedHeaders(chainId) {
 }
 // Proving stopped because the chain moved on from what this viewer reads: an Ethereum fork it does not list, or
 // rollup contracts on Ethereum that were upgraded after it was written. Neither is a passing fault.
-function outdated(e, chain, prefix = '') {
+function outdated(e, chain, prefix = '', cp = null) {
   const fork = e.kind === 'fork';
-  return say('outdated', fork ? 'Agreed by the endpoints. Ethereum has a fork this viewer does not read.' : `Agreed by the endpoints. ${chain}'s contracts on Ethereum were upgraded after this viewer was written.`,
+  if (cp) fact('Starting block', startingText(cp, count, 'Ethereum'));
+  // A fork is one server's report that no other server got past; an upgrade is read by proof.
+  return say('outdated', fork ? 'Not proved. A consensus server reports a fork this viewer does not read, and no server got the light client through.' : `Agreed by the endpoints. ${chain}'s contracts on Ethereum were upgraded after this viewer was written.`,
     `${prefix ? `${prefix} ` : ''}${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. This viewer cannot prove anything ${fork ? 'on any chain' : `on ${chain}`} until it is updated; what is shown rests on the endpoints agreeing.`);
 }
 // Run the check again in place, after the starting block or a node changes.
@@ -175,7 +178,8 @@ function startForm(l1) {
     store(START_KEY(l1), cleaned(field.value));
     restart();
   };
-  $('#start-clear').onclick = () => { store(START_KEY(l1), null); restart(); };
+  // The built-in block, explicitly: what this browser remembered is set aside too.
+  $('#start-clear').onclick = () => { store(START_KEY(l1), null); store(REMEMBER_KEY(l1), null); restart(); };
   for (const kind of ['consensus', 'execution']) {
     const input = $(`#node-${kind}`);
     input.value = ownNode(kind, l1) || '';
@@ -197,6 +201,7 @@ function startForm(l1) {
 // execution node must be on this chain and serve proofs. A node is only asked for data: everything it returns is
 // checked as any server's is.
 async function nodeProblem(kind, chainId, url) {
+  if (/^[a-z]+:\/\/[^/]*@/i.test(url)) return 'A node address may not hold a user name or password: this page keeps it in plain text.';
   if (!/^https:\/\/|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(url)) return 'A node must be at an https address, or at http on localhost or 127.0.0.1: a browser will not ask anything else from this page.';
   try {
     if (kind === 'consensus') {
@@ -204,6 +209,10 @@ async function nodeProblem(kind, chainId, url) {
       if (!g || String(g.genesis_validators_root).toLowerCase() !== NETWORKS[chainId].genesisValidatorsRoot) return `${url} is not a consensus node for ${NETWORKS[chainId].name}: its genesis is another chain's.`;
       const lc = await fetch(`${url}/eth/v1/beacon/light_client/finality_update`, { signal: AbortSignal.timeout(10_000) });
       if (!lc.ok) return `${url} does not serve the light client routes (it answered ${lc.status}). A Lodestar, Nimbus or Lighthouse node needs them turned on.`;
+      // A node that is not synced would vote with an old block: its newest signed header must be recent.
+      const sig = Number((await lc.json())?.data?.signature_slot);
+      const wallSlot = Math.floor((Date.now() / 1000 - NETWORKS[chainId].genesisTime) / 12);
+      if (!(wallSlot - sig < 64)) return `${url} is not synced: its newest signed header is ${Number.isFinite(sig) ? wallSlot - sig : 'an unknown number of'} slots behind.`;
       return null;
     }
     const id = quantity(await rpc({ chain: Object.values(CHAINS).find((c) => c.id === chainId), url, requests: 0, ethCalls: 0, block: 'latest' }, 'eth_chainId', []), 'the chain id');
@@ -212,7 +221,7 @@ async function nodeProblem(kind, chainId, url) {
     try { await rpc({ chain: Object.values(CHAINS).find((c) => c.id === chainId), url, requests: 0, ethCalls: 0, block: 'latest' }, 'eth_getProof', ['0x' + '00'.repeat(20), [], 'finalized']); }
     catch (e) { return `${url} does not serve proofs at the finalized block: ${e.message || e}.`; }
     return null;
-  } catch (e) { return `${url} could not be read from this page: ${e.message || e}. A browser needs the node to allow requests from other sites (CORS).`; }
+  } catch (e) { return `${url} could not be read from this page: ${e.message || e}. The node must allow requests from other sites (CORS; for example Lighthouse --http-allow-origin, geth --http.corsdomain), and a node on localhost must also answer the browser's private-network check, which some clients do not.`; }
 }
 
 // This copy's build, beside the one published on chain when one is.
@@ -289,7 +298,7 @@ async function run() {
   } catch (e) {
     fact('Starting block', `${startingText(cp, count)}`);
     // An expired starting block is not a passing fault: this copy of the viewer proves nothing until it is updated.
-    if (e.kind === 'fork' || e.kind === 'upgraded') return outdated(e, ROLLUPS[chain.id]?.name || chain.name);
+    if (e.kind === 'fork' || e.kind === 'upgraded') return outdated(e, ROLLUPS[chain.id]?.name || chain.name, '', cp);
     if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
     return say('agreed', 'Agreed by the endpoints. Not proved.', `The proof could not be made: ${e.message || e}`);
   }
@@ -428,7 +437,7 @@ async function token(chain, target, head, openUrl) {
       fact('Endpoints at that block', atFinalized.length ? atFinalized.map(([h, r]) => `${h}: ${computed.success && r === computed.output ? 'the same reply' : 'another reply'}`).join('; ') : 'none answered');
     }
   } catch (e) {
-    if (e.kind === 'fork' || e.kind === 'upgraded') return outdated(e, ROLLUPS[chain.id]?.name || chain.name);
+    if (e.kind === 'fork' || e.kind === 'upgraded') return outdated(e, ROLLUPS[chain.id]?.name || chain.name, '', cp);
     if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${agreed} ${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
     computed = { done: false, why: `the finalized block could not be established: ${e.message || e}` };
   }
@@ -488,7 +497,7 @@ async function rollupToken(chain, target, head, { read, shown, got, agreed }) {
       fact('Endpoints at that block', atClaim.length ? atClaim.map(([h, r]) => `${h}: ${computed.success && r === computed.output ? 'the same reply' : 'another reply'}`).join('; ') : 'none keeps that block');
     }
   } catch (e) {
-    if (e.kind === 'fork' || e.kind === 'upgraded') return outdated(e, ROLLUPS[chain.id]?.name || chain.name);
+    if (e.kind === 'fork' || e.kind === 'upgraded') return outdated(e, ROLLUPS[chain.id]?.name || chain.name, '', cp);
     if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${agreed} ${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
     computed = { done: false, why: `what ${name} has on Ethereum could not be read by proof: ${e.message || e}` };
   }
@@ -533,7 +542,7 @@ async function rollup(chain, target, head) {
     }
   } catch (e) {
     fact('Starting block', `${startingText(cp, count, 'Ethereum')}`);
-    if (e.kind === 'fork' || e.kind === 'upgraded') return outdated(e, ROLLUPS[chain.id]?.name || chain.name);
+    if (e.kind === 'fork' || e.kind === 'upgraded') return outdated(e, ROLLUPS[chain.id]?.name || chain.name, '', cp);
     if (e.kind === 'stale') return say('expired', 'Agreed by the endpoints. This copy of the viewer is too old to prove anything.', `${(e.message || '').replace(/^./, (c) => c.toUpperCase())}. Reload the page to fetch a newer copy; if this message stays, the viewer's host has not been updated.`);
     return say('agreed', 'Agreed by the endpoints. Not proved.', `What ${name} has on Ethereum could not be read by proof: ${e.message || e}`);
   }
