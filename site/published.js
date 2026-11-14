@@ -8,7 +8,9 @@
 // to compare a copy with by other means (the file's SHA-256, or abxfs-rs reading the same project).
 
 // The project that holds the published check page: { chainId, org, token }, or null while none is published.
-const PUBLISHED = null;
+// Base, org "TheBenMeadows", project 2 ("from-chain check page"), first published 2026-11-13. Each build that
+// changes the viewer is published there as the project's next version, with its build.txt.
+const PUBLISHED = { chainId: 8453, org: '0x6cb8206e55cf52e069fd3ed3d75b5d391934693c', token: '2' };
 const BUILD_FILE = 'build.txt', CHECK_FILE = 'abxfs-check.html';
 const HASH = /^[0-9a-f]{64}$/;
 // build.txt is two lines: the build's hash (what a copy knows about itself), and the SHA-256 of the one file
