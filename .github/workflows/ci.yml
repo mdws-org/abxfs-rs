@@ -82,3 +82,19 @@ jobs:
           ./target/release/abxfs-rs read "$root" --chain robinhood --out got
           ls -la got
           ./target/release/abxfs-rs verify "$root" got --chain robinhood
+  site-type:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the type check
+        run: npm ci --prefix tools/type-check
+      # Renders site/ in the runner's Chrome; it prints one line per problem
+      # (line length, body size, justified on a phone) and nothing when the
+      # page holds. Its Safari word-spacing pass runs on macOS only.
+      - name: Line length and body size on site/
+        run: |
+          out=$(node tools/type-check/check-measure.mjs site)
+          if [ -n "$out" ]; then echo "$out"; exit 1; fi
