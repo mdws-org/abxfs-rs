@@ -89,12 +89,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install the type check and WebKit
-        run: npm ci --prefix tools/type-check && npx --prefix tools/type-check playwright-core install --with-deps webkit
-      # Renders site/ in the runner's Chrome and in WebKit; it prints one line
-      # per problem (line length, body size, justified on a phone, stretched
-      # word spaces in Safari) and nothing when the page holds.
-      - name: Line length, body size and Safari word spacing on site/
+      - name: Install the type check
+        run: npm ci --prefix tools/type-check
+      # Renders site/ in the runner's Chrome; it prints one line per problem
+      # (line length, body size, justified on a phone) and nothing when the
+      # page holds. Its Safari word-spacing pass runs on macOS only.
+      - name: Line length and body size on site/
         run: |
           out=$(node tools/type-check/check-measure.mjs site)
           if [ -n "$out" ]; then echo "$out"; exit 1; fi
