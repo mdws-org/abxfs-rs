@@ -31,7 +31,8 @@ for (const [name, hash, want] of CASES) {
   await page.waitForFunction(() => { const v = document.querySelector('#verdict'); return v && v.dataset.state !== 'working'; }, null, { timeout: 120_000 }).catch(() => {});
   const got = await page.evaluate(() => ({ state: document.querySelector('#verdict')?.dataset.state, text: document.querySelector('#verdict')?.textContent, reason: document.querySelector('#reason')?.textContent, facts: [...document.querySelectorAll('#facts dt')].map((dt) => dt.textContent), path: location.pathname, workers: navigator.serviceWorker ? null : 'none', open: !document.querySelector('#open').hidden }));
   const regs = await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length);
-  const ok = want.includes(got.state) && got.path === '/_abxfs/check.html' && regs === 0 && !errors.length;
+  // Cloudflare Pages answers /_abxfs/check.html with a redirect to /_abxfs/check (its pretty URLs); both are the check page.
+  const ok = want.includes(got.state) && ['/_abxfs/check.html', '/_abxfs/check'].includes(got.path) && regs === 0 && !errors.length;
   bad += !ok;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${got.state} in ${Date.now() - t0} ms: "${got.text}" ${got.reason ? `(${got.reason.slice(0, 110)})` : ''}${regs ? ' A SERVICE WORKER WAS REGISTERED' : ''}${errors.length ? ' errors: ' + errors.join('; ') : ''}`);
   if (process.env.VERBOSE) console.log('     facts:', got.facts.join(' | '), '| open link shown:', got.open);
