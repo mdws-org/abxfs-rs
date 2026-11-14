@@ -111,7 +111,12 @@ def build():
     data = page.encode("utf-8")
     file_hash = hashlib.sha256(data).hexdigest()
     (OUT / "abxfs-check.html").write_bytes(data)
-    (OUT / "build.txt").write_bytes(f"build {build_hash}\nsha256 {file_hash}  abxfs-check.html\n".encode())
+    # With --ipfs <cid>, a third line names the IPFS CID of the whole viewer as built (tools/archive: the deploy job
+    # pins view-dist and passes its CID here).
+    cid = sys.argv[sys.argv.index("--ipfs") + 1] if "--ipfs" in sys.argv else ""
+    if cid and not re.fullmatch(r"b[a-z2-7]{20,100}", cid):
+        raise SystemExit("--ipfs takes a CIDv1 in base32")
+    (OUT / "build.txt").write_bytes((f"build {build_hash}\nsha256 {file_hash}  abxfs-check.html\n" + (f"ipfs {cid}\n" if cid else "")).encode())
     print(f"abxfs-check.html: {len(data):,} bytes, sha256 {file_hash}")
     print(f"build.txt: build {build_hash}")
 

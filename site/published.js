@@ -12,15 +12,16 @@ const PUBLISHED = null;
 const BUILD_FILE = 'build.txt', CHECK_FILE = 'abxfs-check.html';
 const HASH = /^[0-9a-f]{64}$/;
 // build.txt is two lines: the build's hash (what a copy knows about itself), and the SHA-256 of the one file
-// (what a reader can compute from the file they hold).
-const LINES = /^build ([0-9a-f]{64})\nsha256 ([0-9a-f]{64})  abxfs-check\.html\n?$/;
+// (what a reader can compute from the file they hold). A third line may follow: the IPFS CID of the whole viewer
+// as built (a CIDv1 in base32), from which any IPFS node gives the files of that build.
+const LINES = /^build ([0-9a-f]{64})\nsha256 ([0-9a-f]{64})  abxfs-check\.html(?:\nipfs (b[a-z2-7]{20,100}))?\n?$/;
 
-// What a published project holds: { build, sha256 }. `read(path)` returns the bytes of one file under the
+// What a published project holds: { build, sha256, ipfs } (ipfs is null when build.txt has no third line). `read(path)` returns the bytes of one file under the
 // project's current root, already checked against it. Throws when the file is missing or is not those two lines.
 async function publishedBuild(read) {
   const m = LINES.exec(new TextDecoder().decode(await read(BUILD_FILE)));
   if (!m) throw new Error(`${BUILD_FILE} on chain is not a build hash and a file hash`);
-  return { build: m[1], sha256: m[2] };
+  return { build: m[1], sha256: m[2], ipfs: m[3] || null };
 }
 
 // What a copy says about itself. `mine` is this copy's build hash; `published` is the one on chain, or null

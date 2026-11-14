@@ -249,7 +249,7 @@ async function buildLine() {
     const published = await publishedBuild(read);
     const r = compareBuild(BUILD, published.build);
     // The project's root is as the endpoints agree on it: nothing here proves it is the newest one published.
-    note({ ...r, text: `${r.text} (project ${hostLabel({ kind: 'project', ...PUBLISHED })}, root ${head.root}, as ${head.sources.length} endpoints agree on it at block ${count(head.block)}; not proved). The one-file check page published there has SHA-256 ${published.sha256}` });
+    note({ ...r, text: `${r.text} (project ${hostLabel({ kind: 'project', ...PUBLISHED })}, root ${head.root}, as ${head.sources.length} endpoints agree on it at block ${count(head.block)}; not proved). The one-file check page published there has SHA-256 ${published.sha256}${published.ipfs ? `, and the whole viewer of that build is on IPFS as ${published.ipfs}` : ''}` });
   } catch (e) { note(compareBuild(BUILD, null, e.message || String(e))); }
 }
 
