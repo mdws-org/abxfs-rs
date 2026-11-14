@@ -18,7 +18,7 @@ const USAGE: &str = "usage:
   abxfs-rs read <root> --chain <name> [--rpc URL] [--out PATH] [--in-flight N]
   abxfs-rs read <project> [--rpc URL] [--out PATH] [--in-flight N]
   abxfs-rs root <project> [--rpc URL]
-  abxfs-rs serve [--port N] [--rpc URL]
+  abxfs-rs serve [--port N] [--rpc URL] [--host NAME]... [--memory MiB]
   abxfs-rs bundle <project> --key abxfs.cid|bamfs.cid --root <root> --proof <proof.json> --out <bundle.car> [--rpc URL]
   abxfs-rs verify-bundle <bundle.car> [--out DIR]
   abxfs-rs verify <root> <local folder or file> --chain <name> [--rpc URL] [--in-flight N] [--include-hidden] [--no-fastlz]
@@ -40,7 +40,9 @@ root     Prints a project's current root. A project is <chain id>-<org contract>
          root is current: this says what the endpoints agree on, not a proof.
 
 serve    Serves projects on this machine at http://<project>.localhost:<port>/ (default port 8090), each file read
-         from chain and checked as read checks it. Answers only names under localhost.
+         from chain and checked as read checks it. Answers only names under localhost, and under each --host NAME
+         (an onion address, say): a visitor of such a name trusts this server to have checked, and every response
+         and the page /_abxfs/served say so. --memory bounds the project files kept in memory (default 1024 MiB).
 
 bundle   Writes an archive bundle (archive/ARCHIVE.md) of one version of a project: the content of <root>, read
          and checked from chain, with the binding proof in <proof.json> (made by tools/archive/proof.mjs). The bundle
@@ -333,15 +335,25 @@ fn cmd_root(rest: &[String]) -> Result<(), String> {
 fn cmd_serve(rest: &[String]) -> Result<(), String> {
     let mut port = 8090u16;
     let mut rpc: Option<String> = None;
+    let mut hosts: Vec<String> = Vec::new();
+    let mut max_bytes = abxfs::serve::MAX_TREE_BYTES;
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--port" => port = it.next().ok_or("--port needs a value")?.parse().map_err(|_| "--port takes a number".to_string())?,
             "--rpc" => rpc = Some(it.next().ok_or("--rpc needs a value")?.clone()),
+            "--host" => hosts.push(it.next().ok_or("--host needs a value")?.clone()),
+            "--memory" => {
+                let mib: usize = it.next().ok_or("--memory needs a value")?.parse().map_err(|_| "--memory takes a number of MiB".to_string())?;
+                if !(1..=1024).contains(&mib) {
+                    return Err("--memory takes 1 to 1024 MiB".into());
+                }
+                max_bytes = mib * 1024 * 1024;
+            }
             s => return Err(format!("unexpected argument \"{s}\"")),
         }
     }
-    abxfs::serve::serve(port, rpc)
+    abxfs::serve::serve(port, rpc, hosts, max_bytes)
 }
 
 fn lossy(b: &[u8]) -> String {
