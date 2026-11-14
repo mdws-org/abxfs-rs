@@ -6,6 +6,11 @@
 
 pub mod abi;
 #[cfg(feature = "cli")]
+pub mod bundle;
+pub mod bundle_verify;
+pub mod car;
+pub mod mpt;
+#[cfg(feature = "cli")]
 pub mod bamfs;
 #[cfg(feature = "cli")]
 pub mod chain;

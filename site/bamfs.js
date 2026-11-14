@@ -260,7 +260,10 @@ async function readFile(ctx, cid, info) {
     body = info.compression & 0x80 ? await decodeEach(algorithm, stored, MAX_FILE_BYTES) : await decode(algorithm, concat(...stored), MAX_FILE_BYTES);
     if (H(body) !== info.outputHash) refuse(`file ${cid}: its decoded bytes do not hash to its output hash`);
   }
-  if (info.generation === 2 && body.length !== info.size) refuse(`file ${cid} is ${body.length} bytes, its record says ${info.size}`);
+  // A second-generation record's size counts the bytes stored: the file's length when it is not compressed, and
+  // the compressed length (all chunks together) when it is.
+  const kept = info.compression ? total : body.length;
+  if (info.generation === 2 && kept !== info.size) refuse(`file ${cid} stores ${kept} bytes, its record says ${info.size}`);
   return body;
 }
 

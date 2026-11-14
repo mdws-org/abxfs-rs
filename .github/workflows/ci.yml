@@ -64,6 +64,17 @@ jobs:
         run: node oracle/make-corpus.mjs oracle/corpus-edge
       - name: Build the Rust reader and run its tests
         run: cargo build --release --locked && cargo test --release --locked
+      - name: Every archive test vector gives the output its .out file names (archive/ARCHIVE.md section 14)
+        run: tools/archive/check-vectors.sh ./target/release/abxfs-rs verify-bundle
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - name: The two independent verifiers give the same output on every vector
+        run: |
+          set -e
+          tools/archive/check-vectors.sh python3 archive/verifiers/python/verify.py
+          (cd archive/verifiers/go && go build -o abxverify .)
+          tools/archive/check-vectors.sh archive/verifiers/go/abxverify
       - name: Read a Robinhood Chain project's root and compare it with the plan of what was read
         run: |
           set -e

@@ -46,6 +46,11 @@ def build():
         shutil.copyfile(VENDOR / rel, to)
     # The switch that turns proving off is the one file a host may change, so it is not part of the build's hashes.
     shutil.copyfile(VIEW / "switch.json", OUT / "_abxfs" / "switch.json")
+    # The archive manifest (archive/ARCHIVE.md section 13) changes as bundles are made, so it is not hashed either.
+    manifest = VIEW.parent / "archive" / "manifest.json"
+    if manifest.exists():
+        (OUT / "_abxfs" / "archive").mkdir()
+        shutil.copyfile(manifest, OUT / "_abxfs" / "archive" / "manifest.json")
     # files.js: the SHA-256 of every file the viewer is made of, and one hash over that list. The worker imports
     # it to check its kept copies; the info page shows it, so a reader can compare a host with this repository.
     listed = {"/index.html": OUT / "index.html"}
