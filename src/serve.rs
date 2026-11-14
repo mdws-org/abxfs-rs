@@ -47,6 +47,10 @@ type TreeKey = ([u8; 32], Store);
 
 struct State {
     own_rpc: Option<String>,
+    /// Names besides localhost that this server answers under (an onion address, for one), lowercased.
+    hosts: Vec<String>,
+    /// Most bytes of project files kept in memory.
+    max_bytes: usize,
     roots: Mutex<HashMap<String, (Instant, Current)>>,
     trees: Mutex<HashMap<TreeKey, Arc<Served>>>,
     /// Reads under way, so that two requests for one root read it once.
@@ -62,13 +66,21 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// Serve until the process is stopped, on 127.0.0.1 and, where the machine has it, [::1]. `own_rpc` is the
 /// reader's own endpoint, believed alone for roots and used for every read; without it, roots need two public
-/// endpoints that agree.
-pub fn serve(port: u16, own_rpc: Option<String>) -> Result<()> {
+/// endpoints that agree. `hosts` are names besides localhost to answer under, for a gateway that others reach
+/// (through an onion service, say): a visitor of such a name trusts this server to have done the checking, and
+/// every response and the page at /_abxfs/served say so. `max_bytes` bounds the files kept in memory.
+pub fn serve(port: u16, own_rpc: Option<String>, hosts: Vec<String>, max_bytes: usize) -> Result<()> {
+    let hosts: Vec<String> = hosts.into_iter().map(|h| h.trim().trim_matches('.').to_ascii_lowercase()).filter(|h| !h.is_empty()).collect();
+    for h in &hosts {
+        eprintln!("also answering http://<chain id>-<org>-<project>.{h}/ : for those visitors this server does the checking");
+    }
     let v4 = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("127.0.0.1:{port}: {e}"))?;
     let v6 = TcpListener::bind(("::1", port)).ok();
     eprintln!("serving ABX projects at http://<chain id>-<org>-<project>.localhost:{port}/ (stop with Ctrl-C)");
     let state = Arc::new(State {
         own_rpc,
+        hosts,
+        max_bytes,
         roots: Mutex::new(HashMap::new()),
         trees: Mutex::new(HashMap::new()),
         reading: Mutex::new(HashMap::new()),
@@ -203,12 +215,21 @@ fn handle(mut stream: TcpStream, state: &State, port: u16) -> std::io::Result<()
         return text(&mut stream, "403 Forbidden", "Requests from other sites are not served.", head);
     }
     let name = host_name(&req.host);
+    if let Some(h) = state.hosts.iter().find(|h| h.as_str() == name) {
+        let page = format!("ABX projects, read from chain and checked by this server.\n\nOpen http://<chain id>-<org contract>-<project number>.{h}/\nfor example http://8453-ab025e1f9f469ae55e5f193ecdddaa1e0f4e2ff6-0.{h}/\n\nThis server reads each project from public chain endpoints and checks every byte against the project's root\nbefore it sends it. Your browser checks nothing here: you are trusting this server. To check for yourself, run\nthe same reader on your own machine (https://github.com/mdws-org/abxfs-rs, `abxfs-rs serve`), or verify an\narchive bundle offline. Each project's page at /_abxfs/served says which root was served and what it rests on.\n");
+        return text(&mut stream, "200 OK", &page, head);
+    }
     if name == "localhost" || name == "127.0.0.1" || name == "[::1]" {
         let page = format!("ABX projects read from chain on this machine.\n\nOpen http://<chain id>-<org contract>-<project number>.localhost:{port}/\nfor example http://8453-ab025e1f9f469ae55e5f193ecdddaa1e0f4e2ff6-0.localhost:{port}/\n");
         return text(&mut stream, "200 OK", &page, head);
     }
-    let Some(label) = name.strip_suffix(".localhost") else {
-        return text(&mut stream, "421 Misdirected Request", "This server answers only names under localhost.", head);
+    let remote = state.hosts.iter().find(|h| name.ends_with(&format!(".{h}")));
+    let label = match remote {
+        Some(h) => &name[..name.len() - h.len() - 1],
+        None => match name.strip_suffix(".localhost") {
+            Some(l) => l,
+            None => return text(&mut stream, "421 Misdirected Request", "This server answers only the names it was started with.", head),
+        },
     };
     let Some(project) = parse_label(label) else {
         return text(&mut stream, "404 Not Found", "Not a project name: use <chain id>-<org contract>-<project number>.", head);
@@ -224,6 +245,12 @@ fn handle(mut stream: TcpStream, state: &State, port: u16) -> std::io::Result<()
         Ok(t) => t,
         Err(e) => return text(&mut stream, "502 Bad Gateway", &format!("The project's files could not be read and checked: {e}"), head),
     };
+    // What was served and what it rests on. The path is the viewer's own namespace, which no project page uses.
+    if req.path == "/_abxfs/served" {
+        let who = if remote.is_some() { "This server read it from chain and checked every byte against that root. Your browser checked nothing:\nyou are trusting this server. To check for yourself, run the reader on your own machine\n(https://github.com/mdws-org/abxfs-rs) or verify an archive bundle offline." } else { "This reader, on your own machine, read it from chain and checked every byte against that root." };
+        let page = format!("project {}\nroot {}\nstore {}\nagreed by {} at block {} (which root is current is what the endpoints agree on, not a proof)\n\n{who}\n", project.label(), to_hex(&current.root), if current.store == Store::Bamfs { "bamfs" } else { "abxfs" }, current.sources.join(", "), current.block);
+        return text(&mut stream, "200 OK", &page, head);
+    }
     let mut path = percent_decode(req.path.trim_start_matches('/'));
     if served.kind == Kind::File {
         path.clear();
@@ -237,7 +264,11 @@ fn handle(mut stream: TcpStream, state: &State, port: u16) -> std::io::Result<()
         Some(f) => ("200 OK", Some(f)),
         None => ("404 Not Found", served.files.get(b"404.html".as_slice())),
     };
-    let extra = [("X-ABXFS-Root", to_hex(&current.root)), ("X-ABXFS-Agreed", format!("{} at block {}", current.sources.join(", "), current.block))];
+    let extra = [
+        ("X-ABXFS-Root", to_hex(&current.root)),
+        ("X-ABXFS-Agreed", format!("{} at block {}", current.sources.join(", "), current.block)),
+        ("X-ABXFS-Checked-By", if remote.is_some() { "this server, not your browser; see /_abxfs/served".to_string() } else { "this reader on your machine".to_string() }),
+    ];
     match found {
         Some((mime, bytes)) => respond(&mut stream, status, mime, bytes, head, &extra),
         None => text(&mut stream, "404 Not Found", "Not in this project.", head),
@@ -277,7 +308,7 @@ fn tree_for(state: &State, project: &Project, current: &Current) -> Result<Arc<S
         let served = Arc::new(if current.store == Store::Bamfs { read_bamfs(state, project, &current.root)? } else { read_abxfs(state, project, &current.root)? });
         let mut trees = lock(&state.trees);
         let held: usize = trees.values().map(|t| t.bytes).sum();
-        if trees.len() >= MAX_TREES || held + served.bytes > MAX_TREE_BYTES {
+        if trees.len() >= MAX_TREES || held + served.bytes > state.max_bytes {
             trees.clear();
         }
         trees.insert(key, Arc::clone(&served));
@@ -297,7 +328,7 @@ fn media_type(raw: &[u8]) -> String {
 }
 
 fn read_bamfs(state: &State, project: &Project, root: &[u8; 32]) -> Result<Served> {
-    let tree = bamfs_read(project, state.own_rpc.as_deref(), root, MAX_TREE_BYTES)?;
+    let tree = bamfs_read(project, state.own_rpc.as_deref(), root, state.max_bytes)?;
     let kind = if tree.is_file { Kind::File } else { Kind::Directory };
     let bytes = tree.bytes;
     let files = tree.files.into_iter().map(|f| (f.path.into_bytes(), (media_type(f.mime.as_bytes()), f.content))).collect();
@@ -320,8 +351,8 @@ fn read_abxfs(state: &State, project: &Project, root: &[u8; 32]) -> Result<Serve
             None => {
                 let c = Arc::new(f.content.clone().ok_or("a file's content was not read")?);
                 bytes += c.len();
-                if bytes > MAX_TREE_BYTES {
-                    return Err(format!("the project holds more than {} MiB, more than this server keeps", MAX_TREE_BYTES / 1048576));
+                if bytes > state.max_bytes {
+                    return Err(format!("the project holds more than {} MiB, more than this server keeps", state.max_bytes / 1048576));
                 }
                 shared.insert(p.cid, Arc::clone(&c));
                 c
