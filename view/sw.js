@@ -22,6 +22,7 @@ import { agreedTokenUri, generatorPage, readTokenUri, repliesAt } from './token.
 import { computedAt } from './evm-state.js';
 import { keccak256 } from './keccak-lookup.js';
 import { readFile as bamfsRead, walk as bamfsWalk } from './bamfs.js';
+import { refuses } from './refuse.js';
 
 const TOKEN_PARAM = '0x6bd39222'; // tokenParam(uint256,bytes32)
 const KEY_CID = '61627866732e636964'.padEnd(64, '0'); // "abxfs.cid"
@@ -260,6 +261,39 @@ async function proofAllowed() {
     if (r.ok && (await r.json()).proof === false) switchOn = false;
   } catch { /* unreachable: unchanged */ }
   return switchOn;
+}
+
+// The host can decline to show a page by listing its hostname label under "refuse" in the same file. Unlike the
+// proof switch this can be undone: the list is read again each minute, and a host that cannot be reached leaves
+// the last answer in place (nothing refused, for a worker that has never reached it).
+let refuseAt = 0, refused = false;
+async function hostRefuses() {
+  if (Date.now() - refuseAt < SWITCH_TTL_MS) return refused;
+  refuseAt = Date.now();
+  try {
+    const r = await fetch(`${OWN}switch.json`, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+    if (r.ok) refused = refuses(await r.json(), self.location.hostname);
+  } catch { /* unreachable: unchanged */ }
+  return refused;
+}
+
+// What is shown in place of a page this host declines. Nothing of the project is read.
+function refusedPage(request) {
+  const title = 'This host does not show this project';
+  if (request.mode !== 'navigate') return new Response(title, { status: 451, headers: { 'content-type': 'text/plain; charset=utf-8', 'x-content-type-options': 'nosniff' } });
+  return new Response(
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<title>${esc(title)}</title><link rel="stylesheet" href="${OWN}view.css">` +
+    `<main><h1>${esc(title)}</h1>` +
+    `<p>The people who run ${esc(self.location.hostname.split('.').slice(1).join('.'))} have chosen not to show it here. That is this host's choice alone: the project is on chain as before, and nothing here changes it.</p>` +
+    `<p>Other ways to view it:</p><ul>` +
+    (gatewayUrl(target) ? `<li><a href="${esc(gatewayUrl(target))}">ABX FS's own gateway</a></li>` : '') +
+    `<li>another host of this viewer, if you know one</li>` +
+    `<li>on your own machine, with the reader from <a href="https://github.com/mdws-org/abxfs-rs">mdws-org/abxfs-rs</a> (<code>abxfs-rs serve</code>)</li>` +
+    `<li>from the archive: <a href="${OWN}archive/manifest.json">the list of bundles</a>, each checkable offline</li></ul>` +
+    (checkUrl(target) ? `<p><a href="${esc(checkUrl(target))}">What the chain says about this project</a></p>` : '') + `</main>`,
+    { status: 451, headers: { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'content-security-policy': PAGE_CSP } },
+  );
 }
 
 // The root read by proof at the newest finalized block, and what the endpoints give at that block.
@@ -712,7 +746,7 @@ self.addEventListener('fetch', (event) => {
   }
   if (request.method !== 'GET' && request.method !== 'HEAD') return void event.respondWith(new Response(null, { status: 405 }));
   if (!target || !chain) return; // the start page explains
-  event.respondWith(settingLoaded.then(() => answer(event)));
+  event.respondWith(settingLoaded.then(async () => (await hostRefuses() ? refusedPage(request) : answer(event))));
 });
 
 // The info page asks what this worker is showing and what it has checked.

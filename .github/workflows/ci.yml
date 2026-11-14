@@ -44,7 +44,7 @@ jobs:
           node tests/evm-chains.mjs
           EVM_DIR="$RUNNER_TEMP/evm" node tests/evm-mutants.mjs
       - name: The reader's own starting block and the published build, then each rule removed in turn
-        run: node tests/start.mjs && node tests/start-mutants.mjs
+        run: node tests/start.mjs && node tests/start-mutants.mjs && node tests/refuse.mjs
       - name: The check page as one file is made, and is the same bytes when made again
         run: |
           set -e

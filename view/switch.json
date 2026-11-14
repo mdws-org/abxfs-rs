@@ -1,1 +1,1 @@
-{ "proof": true, "note": "Set proof to false to stop every installed viewer from comparing a project's root with a proof. Proving cannot be forced on from here." }
+{ "proof": true, "refuse": [], "note": "Set proof to false to stop every installed viewer from comparing a project's root with a proof. Proving cannot be forced on from here. List hostname labels under refuse (for example 8453-ab02...-0) to have this host decline to show them; the page then says so and names the other ways to view the project." }
