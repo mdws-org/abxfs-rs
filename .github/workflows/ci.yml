@@ -82,3 +82,19 @@ jobs:
           ./target/release/abxfs-rs read "$root" --chain robinhood --out got
           ls -la got
           ./target/release/abxfs-rs verify "$root" got --chain robinhood
+  site-type:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the type check and WebKit
+        run: npm ci --prefix tools/type-check && npx --prefix tools/type-check playwright-core install --with-deps webkit
+      # Renders site/ in the runner's Chrome and in WebKit; it prints one line
+      # per problem (line length, body size, justified on a phone, stretched
+      # word spaces in Safari) and nothing when the page holds.
+      - name: Line length, body size and Safari word spacing on site/
+        run: |
+          out=$(node tools/type-check/check-measure.mjs site)
+          if [ -n "$out" ]; then echo "$out"; exit 1; fi

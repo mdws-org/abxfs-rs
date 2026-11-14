@@ -2,13 +2,14 @@
 @font-face {
     font-family: 'Public Sans';
     src: url('publicsans.woff2') format('woff2');
-    font-weight: 100 900;
+    font-weight: 400 700;
     font-display: swap;
 }
 :root {
     --bg: #000000;
     --ink: #a3a3a3;
-    --ink-soft: #737373;
+    /* #737373 measured 4.42:1 on black, under the 4.5:1 floor; #757575 is 4.56:1. */
+    --ink-soft: #757575;
     --title: #d4d4d4;
     --rule: #27272a;
     --accent: #ffffff;
@@ -42,6 +43,8 @@ body {
     font-family: 'Public Sans', system-ui, sans-serif;
     line-height: 1.55;
     font-variant-numeric: tabular-nums;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 a { color: inherit; }
 code, pre, .mono {
@@ -97,6 +100,11 @@ h1 {
     margin: 28px 0 8px;
 }
 .sub { margin: 0 0 10px; }
+/* Prose keeps the family's reading measure (about 66 characters a line at
+   16px) inside the 960px tool frame; tables, file lists, code and the drop
+   zone use the full width. */
+.sub, main p, main li { max-width: 35rem; }
+h1 { text-wrap: balance; }
 section { margin-top: 48px; }
 h2 {
     color: var(--accent);

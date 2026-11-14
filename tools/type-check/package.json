@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "The one dependency of tools/type-check/check-measure.mjs.",
+  "dependencies": {
+    "playwright-core": "1.64.1"
+  }
+}
