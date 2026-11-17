@@ -32,6 +32,9 @@ services:
         name: Referrer-Policy
         value: no-referrer
       - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000
+      - path: /*
         name: Content-Security-Policy
         value: "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
       - path: /_abxfs/sw.js

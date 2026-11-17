@@ -237,8 +237,8 @@ async function askHead() {
   let got = await param(KEY_CID), key = KEY_CID;
   // No ABX FS root: the project may have been published to BAMFS, whose root is kept under another name.
   if (got[0].root === ZERO) {
-    const older = await param(KEY_BAMFS).catch(() => null);
-    if (older && older[0].root !== ZERO) { got = older; key = KEY_BAMFS; }
+    const older = await param(KEY_BAMFS);
+    if (older[0].root !== ZERO) { got = older; key = KEY_BAMFS; }
   }
   return { root: got[0].root, sources: got.map((g) => host(g.url)), block, key };
 }
@@ -762,7 +762,7 @@ self.addEventListener('message', (event) => {
   event.waitUntil((async () => {
     await settingLoaded;
     const out = {
-      target, build: BUILD, files: FILES, custom: custom && host(custom), check: target && target.kind === 'project' ? checkUrl(target) : null,
+      target, build: BUILD, files: FILES, custom: Boolean(custom), check: target && target.kind === 'project' ? checkUrl(target) : null,
       chain: chain && { name: chain.name, id: chain.id, endpoints: chain.rpcs.map(host) },
     };
     try {

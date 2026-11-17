@@ -102,10 +102,10 @@ def build():
         if page.count(find) != 1:
             raise SystemExit(f"check.html does not hold this line once: {find.strip()}")
         page = page.replace(find, put)
-    found = re.search(r'export const BUILD = "([0-9a-f]{64})"', (SRC / "files.js").read_text(encoding="utf-8"))
+    found = re.search(r'export const CODE = "([0-9a-f]{64})"', (SRC / "files.js").read_text(encoding="utf-8"))
     if not found:
-        raise SystemExit("files.js holds no build hash; run tools/build-view.py first")
-    build_hash = found.group(1)
+        raise SystemExit("files.js holds no code hash; run tools/build-view.py first")
+    code_hash = found.group(1)
     OUT.mkdir(exist_ok=True)
     # Bytes are written as they are: no line-end translation, so every machine writes the same file.
     data = page.encode("utf-8")
@@ -116,9 +116,9 @@ def build():
     cid = sys.argv[sys.argv.index("--ipfs") + 1] if "--ipfs" in sys.argv else ""
     if cid and not re.fullmatch(r"b[a-z2-7]{20,100}", cid):
         raise SystemExit("--ipfs takes a CIDv1 in base32")
-    (OUT / "build.txt").write_bytes((f"build {build_hash}\nsha256 {file_hash}  abxfs-check.html\n" + (f"ipfs {cid}\n" if cid else "")).encode())
+    (OUT / "build.txt").write_bytes((f"code {code_hash}\nsha256 {file_hash}  abxfs-check.html\n" + (f"ipfs {cid}\n" if cid else "")).encode())
     print(f"abxfs-check.html: {len(data):,} bytes, sha256 {file_hash}")
-    print(f"build.txt: build {build_hash}")
+    print(f"build.txt: code {code_hash}")
 
 
 if __name__ == "__main__":

@@ -20,18 +20,19 @@ const MUTANTS = [
   ['start', 'an agreed block newer than the built-in one', '&& (!built || g.slot > built.slot)', ''],
   ['start', 'two hosts for an agreed start', 'g.hosts.size >= 2 &&', 'g.hosts.size >= 1 &&'],
   ['start', 'the newest agreed block', '.sort((x, y) => y.slot - x.slot)', '.sort((x, y) => x.slot - y.slot)'],
-  ['published', 'build.txt being those two lines', 'if (!m) throw new Error(`${BUILD_FILE} on chain is not a build hash and a file hash`);', 'if (!m) return { build: "", sha256: "" };'],
+  ['published', 'build.txt being those two lines', 'if (!m) throw new Error(`${BUILD_FILE} on chain is not a code hash and a file hash`);', 'if (!m) return { code: "", sha256: "" };'],
   ['published', 'build.txt ending after its lines', '(?:\\nipfs (b[a-z2-7]{20,100}))?\\n?$/;', '(?:\\nipfs (b[a-z2-7]{20,100}))?\\n?/;'],
   ['published', 'the IPFS line being a CID', '(?:\\nipfs (b[a-z2-7]{20,100}))?', '(?:\\nipfs (\\S+))?'],
   ['published', 'the CID being given', 'ipfs: m[3] || null', 'ipfs: null'],
-  ['published', 'build.txt starting with its first line', 'const LINES = /^build ', 'const LINES = /build '],
+  ['published', 'build.txt starting with its first line', 'const LINES = /^(?:code|build) ', 'const LINES = /(?:code|build) '],
+  ['published', 'the first word of build.txt', 'const LINES = /^(?:code|build) ', 'const LINES = /^\\w+ '],
   ['start', 'a reader\'s block needing a newer finalized block', "if (start.own && fin.shipped) return", "if (false) return"],
   ['start', 'the built-in block standing as the newest', "if (start.own && fin.shipped) return", "if (fin.shipped) return"],
   ['published', 'a whole hash', 'const HASH = /^[0-9a-f]{64}$/;', 'const HASH = /^[0-9a-f]{64}/;'],
   ['published', 'another build being different', "return published === mine ? { state: 'same'", "return true ? { state: 'same'"],
   ['published', 'a published build that was not read', 'if (published === null || published === undefined) return', 'if (false) return'],
-  ['published', 'a copy that has no build', "if (!HASH.test(String(mine))) return { state: 'unknown', text: 'this copy does not know its own build' };", ''],
-  ['published', 'a published value that is no hash', "if (!HASH.test(String(published))) return { state: 'unknown', text: 'what is published on chain is not a build hash' };", ''],
+  ['published', 'a copy that has no code hash', "if (!HASH.test(String(mine))) return { state: 'unknown', text: 'this copy does not know its own code hash' };", ''],
+  ['published', 'a published value that is no hash', "if (!HASH.test(String(published))) return { state: 'unknown', text: 'what is published on chain is not a code hash' };", ''],
 ];
 let bad = 0;
 for (const [which, name, find, put] of MUTANTS) {

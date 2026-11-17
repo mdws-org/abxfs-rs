@@ -1,6 +1,6 @@
 # Each week, propose a fresh starting block for the light client (site/checkpoint.js) as a pull request.
 # The root is taken only when two independent beacon nodes report the same one and the light client can start
-# from it. Nothing is merged here: a person reads the pull request and merges it.
+# from it. Nothing is merged here: the pull request is merged by whoever runs the viewer, after its checks pass.
 # Needs the repository setting "Allow GitHub Actions to create and approve pull requests".
 name: checkpoint
 on:

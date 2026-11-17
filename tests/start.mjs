@@ -72,25 +72,27 @@ check(/nothing here shows that your block is final/.test(S.unusable(readers, { s
 
 // The build published on chain.
 const A = 'a1'.repeat(32), B = 'b2'.repeat(32);
-const TXT = (build, sha) => `build ${build}\nsha256 ${sha}  abxfs-check.html\n`;
+const TXT = (code, sha, word = 'code') => `${word} ${code}\nsha256 ${sha}  abxfs-check.html\n`;
 const file = (s) => async (path) => { if (path !== 'build.txt') throw new Error('asked for ' + path); return new TextEncoder().encode(s); };
-const read = async (s) => { try { const r = await P.publishedBuild(file(s)); return `${r.build} ${r.sha256}`; } catch (e) { return 'refused: ' + e.message; } };
-check(await read(TXT(A, B)) === `${A} ${B}`, 'build.txt with a build hash and a file hash is read');
+const read = async (s) => { try { const r = await P.publishedBuild(file(s)); return `${r.code} ${r.sha256}`; } catch (e) { return 'refused: ' + e.message; } };
+check(await read(TXT(A, B)) === `${A} ${B}`, 'build.txt with a code hash and a file hash is read');
+check(await read(TXT(A, B, 'build')) === `${A} ${B}`, 'build.txt as first published, with "build" on its first line, is read');
+check((await read(TXT(A, B, 'hash'))).startsWith('refused'), 'build.txt with another first word is refused', await read(TXT(A, B, 'hash')));
 check(await read(TXT(A, B).trimEnd()) === `${A} ${B}`, 'build.txt with no last line end is read');
 const CID = 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi';
 check((await P.publishedBuild(file(TXT(A, B) + `ipfs ${CID}\n`))).ipfs === CID, 'build.txt with an IPFS line gives the CID');
 check((await P.publishedBuild(file(TXT(A, B)))).ipfs === null, 'build.txt with no IPFS line gives none');
 for (const [name, s] of [['an IPFS line that is no CID', TXT(A, B) + 'ipfs Qm123\n'], ['an IPFS line before the hashes', `ipfs ${CID}\n` + TXT(A, B)], ['a line after the IPFS line', TXT(A, B) + `ipfs ${CID}\nmore\n`]]) check((await read(s)).startsWith('refused'), `build.txt with ${name} is refused`, await read(s));
-for (const [name, s] of [['one hash alone', A + '\n'], ['the two lines the other way round', `sha256 ${B}  abxfs-check.html\nbuild ${A}\n`], ['a short build hash', TXT(A.slice(2), B)], ['a short file hash', TXT(A, B.slice(2))], ['capitals', TXT(A.toUpperCase(), B)], ['nothing', ''],
+for (const [name, s] of [['one hash alone', A + '\n'], ['the two lines the other way round', `sha256 ${B}  abxfs-check.html\ncode ${A}\n`], ['a short build hash', TXT(A.slice(2), B)], ['a short file hash', TXT(A, B.slice(2))], ['capitals', TXT(A.toUpperCase(), B)], ['nothing', ''],
   ['another file named', TXT(A, B).replace('abxfs-check.html', 'other.html')], ['a third line', TXT(A, B) + 'more\n'], ['words before', 'x' + TXT(A, B)]]) check((await read(s)).startsWith('refused'), `build.txt with ${name} is refused`, await read(s));
 check((await (async () => { try { return await P.publishedBuild(async () => { throw new Error('not in this project'); }); } catch (e) { return 'refused: ' + e.message; } })()).includes('not in this project'), 'a missing build.txt is refused with the reason');
 for (const [name, mine, published, why, want, says] of [
-  ['the same build', A, A, '', 'same', /is the build in the published project/],
-  ['another build', A, B, '', 'different', new RegExp('is not the build in the published project.*' + B)],
+  ['the same code', A, A, '', 'same', /runs the code in the published project/],
+  ['other code', A, B, '', 'different', new RegExp('does not run the code in the published project.*' + B)],
   ['the published build could not be read', A, null, 'the endpoints were down', 'unknown', /could not be read.*endpoints were down/],
-  ['what is published is not a hash', A, 'hello', '', 'unknown', /not a build hash/],
-  ['what is published is a hash with more after it', A, A + 'ff', '', 'unknown', /not a build hash/],
-  ['this copy has no build hash', '', A, '', 'unknown', /does not know its own build/],
+  ['what is published is not a hash', A, 'hello', '', 'unknown', /not a code hash/],
+  ['what is published is a hash with more after it', A, A + 'ff', '', 'unknown', /not a code hash/],
+  ['this copy has no build hash', '', A, '', 'unknown', /does not know its own code hash/],
   ['this copy has no build hash and the published one is the same empty value', '', '', '', 'unknown', /does not know/],
 ]) { const r = P.compareBuild(mine, published, why); check(r.state === want && says.test(r.text), `comparison: ${name}`, r); }
 console.log(bad ? `${bad} FAILED` : 'ok: every starting-block and published-build case');
