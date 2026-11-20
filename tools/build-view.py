@@ -15,6 +15,7 @@ SITE, VIEW, OUT = HERE / "site", HERE / "view", HERE / "view-dist"
 OWN = ["boot.js", "sw.js", "info.html", "info.js", "check.html", "check.js", "evm-worker.js", "view.css"]
 SHARED = ["chain.js", "keccak-lookup.js", "target.js", "light.js", "proof.js", "proved.js", "verdict.js", "checkpoint.js", "base.js", "arbitrum.js", "token.js", "bamfs.js", "evm.js", "evm-state.js", "start.js", "published.js", "refuse.js"]
 VENDOR = SITE / "vendor" / "noble"
+STARTING_BLOCK = "/_abxfs/checkpoint.js"
 
 
 def vendored():
@@ -27,6 +28,11 @@ def vendored():
             raise SystemExit(f"site/vendor/noble/{rel} does not match SHA256SUMS; run tools/vendor-noble.py again")
         out.append(rel)
     return out
+
+
+def list_hash(sums):
+    """One hash over a list of files: the SHA-256 of its "hash  path" lines, in path order."""
+    return hashlib.sha256("".join(f"{h}  {p}\n" for p, h in sorted(sums.items())).encode()).hexdigest()
 
 
 def build():
@@ -57,13 +63,20 @@ def build():
     listed.update({f"/_abxfs/{name}": OUT / "_abxfs" / name for name in OWN + SHARED})
     listed.update({f"/_abxfs/vendor/noble/{rel}": OUT / "_abxfs" / "vendor" / "noble" / rel for rel in vendor})
     sums = {path: hashlib.sha256(f.read_bytes()).hexdigest() for path, f in sorted(listed.items())}
-    build_hash = hashlib.sha256("".join(f"{h}  {p}\n" for p, h in sums.items()).encode()).hexdigest()
+    build_hash = list_hash(sums)
+    # The light client's starting block is replaced every week (tools/checkpoint.py), so the build hash changes
+    # every week with no change to the code. The code hash leaves that one file out: it is what a build published
+    # on chain is compared by (site/published.js), and it changes only when the viewer's code does.
+    code_hash = list_hash({p: h for p, h in sums.items() if p != STARTING_BLOCK})
     (OUT / "_abxfs" / "files.js").write_text(
-        "// Written by tools/build-view.py: the SHA-256 of each viewer file, and of the list itself.\n"
+        "// Written by tools/build-view.py: the SHA-256 of each viewer file, of the list itself (BUILD), and of\n"
+        "// the list without the light client's starting block (CODE).\n"
         f"export const BUILD = {json.dumps(build_hash)};\n"
+        f"export const CODE = {json.dumps(code_hash)};\n"
         f"export const FILES = {json.dumps(sums, indent=2)};\n")
     print(f"built {len(sums) + 2} files in {OUT}")
     print(f"viewer build {build_hash}")
+    print(f"viewer code {code_hash}")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,9 @@ const [A, B, C] = CHAINS.base.rpcs;
 const GOOD = '0x' + '11'.repeat(32), EVIL = '0x' + '22'.repeat(32);
 const OLD = '0x' + '33'.repeat(32);
 const AT = (block) => (block >= 5000 ? GOOD : OLD);
+const ZERO = '0x' + '00'.repeat(32), BAMFS_KEY = '62616d66732e636964';
+// No ABX FS root, and `older` under the BAMFS name.
+const BAMFS = (older) => (block, data) => (data.includes(BAMFS_KEY) ? older : ZERO);
 
 // behave: url -> { block, root } | 'down'. A root may be a function of the block it is read at.
 function endpoints(behave, asked) {
@@ -21,7 +24,7 @@ function endpoints(behave, asked) {
     if (method === 'eth_blockNumber') return reply('0x' + b.block.toString(16));
     if (b.root === 'revert') return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: 3, message: 'execution reverted' } }));
     asked.push(parseInt(params[1], 16));
-    const root = typeof b.root === 'function' ? b.root(parseInt(params[1], 16)) : b.root;
+    const root = typeof b.root === 'function' ? b.root(parseInt(params[1], 16), params[0].data) : b.root;
     return reply(root + '00'.repeat(64));
   };
 }
@@ -41,6 +44,9 @@ const cases = [
   // A contract with no token parameters reverts: that is an answer, the zero root, not an endpoint failing.
   ['all three revert', { [A]: { block: 100, root: 'revert' }, [B]: { block: 100, root: 'revert' }, [C]: { block: 100, root: 'revert' } }, '0x' + '00'.repeat(32)],
   ['one reverts, two give a root', { [A]: { block: 100, root: 'revert' }, [B]: { block: 100, root: GOOD }, [C]: { block: 100, root: GOOD } }, 'check'],
+  // A project published to BAMFS: its root is read by the same rule, and a failed read is not "nothing published".
+  ['a BAMFS root all agree on', { [A]: { block: 100, root: BAMFS(GOOD) }, [B]: { block: 100, root: BAMFS(GOOD) }, [C]: { block: 100, root: BAMFS(GOOD) } }, GOOD],
+  ['a BAMFS root the endpoints disagree on', { [A]: { block: 100, root: BAMFS(EVIL) }, [B]: { block: 100, root: BAMFS(GOOD) }, [C]: { block: 100, root: BAMFS(GOOD) } }, 'check'],
   ['two endpoints far apart', { [A]: { block: 1000, root: AT }, [B]: { block: 10000, root: AT }, [C]: 'down' }, 'rpc'],
 ];
 let bad = 0;

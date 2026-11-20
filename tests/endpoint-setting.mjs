@@ -36,7 +36,8 @@ for (const [name, url] of [['not a URL', 'javascript:alert(1)'], ['plain http, n
   expect(`refused: ${name}`, /Not saved/.test(r.status) && !r.yours, r);
 }
 const saved = await set('https://base.drpc.org');
-expect('saved, and asked first for checked reads', saved.status === 'saved' && /base\.drpc\.org/.test(saved.yours || ''), saved);
+// The page says that an endpoint is set and does not name it: a project's script can open this page on its own origin.
+expect('saved, asked first for checked reads, and not named', saved.status === 'saved' && /^set, and asked first/.test(saved.yours || '') && !/drpc|https?:/.test(saved.yours), saved);
 expect('the info page says the host serves this build', /serves exactly these files/.test(await page.textContent('#host-match')), await page.textContent('#host-match'));
 expect('the info page came from the kept copy', /kept copy/.test(await page.evaluate(async () => (await fetch('/_abxfs/info.js')).headers.get('x-abxfs-from'))), '');
 

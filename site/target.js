@@ -9,6 +9,10 @@
 // chain" links. On localhost the links point at the local viewer (tools/view-serve.py).
 const VIEW_BASE = 'fromchain.dynv6.net';
 const LOCAL_VIEW = 'localhost:8853';
+// Where the check page is linked: a host on another site than the projects, so that nothing a project's page
+// sets for the viewer's site (a cookie, for one) reaches the page that checks it. check.<VIEW_BASE> serves the
+// same page and is used when this is empty.
+const CHECK_HOST = 'check.fromchain.pages.dev';
 
 const B32 = 'abcdefghijklmnopqrstuvwxyz234567';
 
@@ -58,7 +62,8 @@ function checkUrl(t, here = globalThis.location) {
   if (!t || t.kind !== 'project') return null;
   const local = here && /^(localhost|127\.0\.0\.1|.*\.localhost)$/.test(here.hostname);
   if (local) return `http://check.${LOCAL_VIEW}/#${hostLabel(t)}`;
-  return VIEW_BASE ? `https://check.${VIEW_BASE}/#${hostLabel(t)}` : null;
+  const host = CHECK_HOST || (VIEW_BASE && `check.${VIEW_BASE}`);
+  return host ? `https://${host}/#${hostLabel(t)}` : null;
 }
 
 // The same project on ABX FS's own gateway, which names hosts the same way. A bare root has no address there.

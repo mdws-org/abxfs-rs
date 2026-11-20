@@ -12,7 +12,7 @@ import { judge, judgeComputed, judgeRollup, judgeRollupComputed } from './verdic
 import { BASE_PROOF_ENDPOINTS, baseClaims, baseTokenParam } from './base.js';
 import { agreedTokenUri, generatorPage, readTokenUri, repliesAt } from './token.js';
 import { ROLLUPS as ARBITRUM, confirmed, rollupTokenParam } from './arbitrum.js';
-import { BUILD } from './files.js';
+import { BUILD, CODE } from './files.js';
 
 const $ = (s) => document.querySelector(s);
 const ZERO = '0x' + '0'.repeat(64);
@@ -58,7 +58,7 @@ async function agreedHead(chain, target) {
     const got = settled(await Promise.allSettled(near.map(async ({ url }) => {
       let reply;
       try { reply = await rpc(ctx(url), 'eth_call', [{ to: target.org, data }, '0x' + block.toString(16)]); } catch (e) {
-        if (/revert/i.test(e.message || '')) return [new URL(url).host, ZERO];
+        if (e.kind === 'rpc' && /revert/i.test(e.message || '')) return [new URL(url).host, ZERO];
         throw e;
       }
       if (typeof reply !== 'string' || reply.length < 66) throw new Error('tokenParam returned too little');
@@ -71,8 +71,8 @@ async function agreedHead(chain, target) {
   let got = await param(KEY_ABXFS), key = KEY_ABXFS;
   // No ABX FS root: the project may have been published to BAMFS, whose root is kept under another name.
   if (got[0][1] === ZERO) {
-    const older = await param(KEY_BAMFS).catch(() => null);
-    if (older && older[0][1] !== ZERO) { got = older; key = KEY_BAMFS; }
+    const older = await param(KEY_BAMFS);
+    if (older[0][1] !== ZERO) { got = older; key = KEY_BAMFS; }
   }
   return { root: got[0][1], block, sources: got.map(([h]) => h), key };
 }
@@ -227,6 +227,7 @@ async function nodeProblem(kind, chainId, url) {
 // This copy's build, beside the one published on chain when one is.
 async function buildLine() {
   $('#build').textContent = BUILD;
+  $('#code').textContent = CODE;
   if (!PUBLISHED) return;
   const chain = Object.values(CHAINS).find((c) => c.id === PUBLISHED.chainId);
   const note = (r) => { $('#published').textContent = `${r.text.charAt(0).toUpperCase()}${r.text.slice(1)}.`; $('#published').dataset.state = r.state; };
@@ -247,10 +248,10 @@ async function buildLine() {
       throw last;
     };
     const published = await publishedBuild(read);
-    const r = compareBuild(BUILD, published.build);
+    const r = compareBuild(CODE, published.code);
     // The project's root is as the endpoints agree on it: nothing here proves it is the newest one published.
     note({ ...r, text: `${r.text} (project ${hostLabel({ kind: 'project', ...PUBLISHED })}, root ${head.root}, as ${head.sources.length} endpoints agree on it at block ${count(head.block)}; not proved). The one-file check page published there has SHA-256 ${published.sha256}${published.ipfs ? `, and the whole viewer of that build is on IPFS as ${published.ipfs}` : ''}` });
-  } catch (e) { note(compareBuild(BUILD, null, e.message || String(e))); }
+  } catch (e) { note(compareBuild(CODE, null, e.message || String(e))); }
 }
 
 async function run() {
