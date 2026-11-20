@@ -6,15 +6,16 @@ This note is for anyone who finds the ABX archive with nobody left to run it. It
 
 - `archive/ARCHIVE.md`: the format of a bundle. A bundle is one file that holds one version of one ABX project: every byte of its files, and the proof that the project named that version at a stated Ethereum block. This document is the whole definition.
 - `archive/manifest.json`: the list of every bundle made, with its IPFS CID, its proof kind and its anchor block. The from-chain viewer serves a copy at `/_abxfs/archive/manifest.json` on its hosts.
-- The bundles themselves, pinned on IPFS on two servers, and kept as files on the machine that made them.
+- The bundles themselves, in three places: as files of the release `archive-bundles` of this repository (https://github.com/mdws-org/abxfs-rs/releases/tag/archive-bundles), each named `<cid>.car`, with a copy of the manifest; pinned on IPFS on two servers; and kept as files on the machine that made them.
 - Verifiers that read only the bundle: `abxfs-rs verify-bundle` (Rust, in this repository), and two others written from the specification by other authors (`archive/verifiers/`).
 - `archive/vectors/`: test bundles, each with the output a verifier must give.
 
 ## Get a bundle
 
 1. Find the project and version in `archive/manifest.json`. A version has one or more bundles. Use one whose `proof` is not `agreed` or `logged` when there is one.
-2. Fetch the bundle file by its CID from any IPFS node or gateway: `ipfs dag export <cid> > bundle.car`. The file is the same byte for byte wherever it comes from.
-3. If no IPFS node has it, look for a copy of the file anywhere: its name is not important, because the check below does not trust where it came from.
+2. Download `<cid>.car` from the release `archive-bundles`. It needs no account and no IPFS.
+3. Or fetch it by its CID from an IPFS node: `ipfs dag export <cid> > bundle.car`. The file is the same byte for byte wherever it comes from. A public gateway that does not answer says nothing about the bundle: the two servers that pin it are reached over the IPFS network, and a gateway does not always reach them.
+4. If neither has it, look for a copy of the file anywhere: its name is not important, because the check below does not trust where it came from.
 
 ## Check a bundle and get the files
 
@@ -31,6 +32,8 @@ The daily run needs a machine with Node 22 and a Rust toolchain, and an IPFS nod
 2. Run `node tools/archive/daily.mjs <state dir>` once a day. It finds new versions, makes the bundles they lack, and writes `<state dir>/manifest.json`. Keep `<state dir>` between runs: `state.json` remembers what is done.
 3. Pin each new bundle: `ipfs dag import --pin-roots <bundle>.car`.
 4. Publish the manifest where others can find it, and keep the bundle files somewhere other than one IPFS node.
+
+Keep every bundle that carries a proof. A bundle of a version that has since been replaced cannot be made again: the proof in it was read from chain state that nodes no longer serve. Its content can be read from chain again; the proof of when the project named it cannot.
 
 ## What stops it, and what to do
 
